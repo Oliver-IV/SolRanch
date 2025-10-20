@@ -6,14 +6,14 @@ use anchor_lang::prelude::*;
 pub struct Animal {
     pub id: u64,
     pub owner: Pubkey,
-    pub ranch: Pubkey,
+    pub origin_ranch: Pubkey,
     #[max_len(100)]
     pub id_chip: String,
     #[max_len(30)]
     pub specie: String,
     #[max_len(30)]
     pub breed: String,
-    pub bith_date: i64,
+    pub birth_date: i64,
     pub last_sale_price: u64,
     pub sale_price: Option<u64>,
     pub allowed_buyer: Option<Pubkey>,

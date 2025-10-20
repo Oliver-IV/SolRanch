@@ -18,7 +18,7 @@ pub struct RegisterAnimal<'info> {
         ],
         bump
     )]
-    animal: Account<'info, Animal>,
+    pub animal: Account<'info, Animal>,
     #[account(
         constraint = verifier_profile.is_active @ SolranchError::InvalidVerifierError,
         seeds = [
@@ -27,15 +27,16 @@ pub struct RegisterAnimal<'info> {
         ],
         bump
     )]
-    verifier_profile: Account<'info, VerifierProfile>,
+    pub verifier_profile: Account<'info, VerifierProfile>,
     #[account(
         mut,
-        has_one = authority
+        has_one = authority,
+        constraint = ranch_profile.is_verified @ SolranchError::RanchNotVerifiedError
     )]
-    ranch_profile: Account<'info, RanchProfile>,
+    pub ranch_profile: Account<'info, RanchProfile>,
     #[account(mut)]
-    authority: Signer<'info>,
+    pub authority: Signer<'info>,
     #[account(mut)]
-    verifier: Signer<'info>,
-    system_program: Program<'info, System>
+    pub verifier: Signer<'info>,
+    pub system_program: Program<'info, System>
 }
