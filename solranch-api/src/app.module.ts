@@ -15,6 +15,7 @@ import { User } from './auth/entities/user.entity';
 import { Ranch } from './ranch/entities/ranch.entity';
 import { Animal } from './animal/entities/animal.entity';
 import { Verifier } from './verifier/entities/verifier.entity';
+import { PendingTransaction } from './animal/entities/pending-tx.entity';
 
 @Module({
   imports: [
@@ -38,7 +39,8 @@ import { Verifier } from './verifier/entities/verifier.entity';
           Ranch,
           User,
           Animal,
-          Verifier
+          Verifier,
+          PendingTransaction
         ]
       })
     }),

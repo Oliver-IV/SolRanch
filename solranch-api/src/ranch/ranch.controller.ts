@@ -1,3 +1,5 @@
+// 📍 Archivo: src/ranch/ranch.controller.ts
+
 import {
   Controller,
   Post,
@@ -5,11 +7,15 @@ import {
   UseGuards,
   Req,
   Get,
+  Param,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { RanchService } from './ranch.service';
 import { RegisterRanchDto } from './dto/register-ranch.dto';
 import { ConfirmRanchDto } from './dto/confirm-ranch.dto';
+import { AdminGuard } from '../auth/guards/admin.guard';
 
 @UseGuards(AuthGuard('jwt'))
 @Controller('ranch')
@@ -30,8 +36,16 @@ export class RanchController {
     @Body() dto: ConfirmRanchDto,
     @Req() req,
   ) {
+    console.log('>>> [RANCH CONTROLLER] req.user:', req.user);
     const userPubkey: string = req.user.pubkey;
     return this.ranchService.confirmRegistration(dto, userPubkey);
+  }
+
+  @Post('verify/:pda')
+  @UseGuards(AdminGuard) 
+  @HttpCode(HttpStatus.OK)
+  async verifyRanch(@Param('pda') pda: string) {
+    return this.ranchService.verifyRanch(pda);
   }
 
   @Get('me')

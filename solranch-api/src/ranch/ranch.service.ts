@@ -1,5 +1,3 @@
-// 📍 File: src/ranch/ranch.service.ts
-
 import {
   Injectable,
   InternalServerErrorException,
@@ -38,15 +36,18 @@ export class RanchService {
   ) {
     const adminSecret = this.configService.get<string>('ADMIN_SECRET_KEY');
     if (!adminSecret) {
+      this.logger.error('ADMIN_SECRET_KEY not set'); 
       throw new InternalServerErrorException('ADMIN_SECRET_KEY not set');
     }
     this.adminKeypair = Keypair.fromSecretKey(bs58.decode(adminSecret));
+    this.logger.log('RanchService initialized');
   }
 
   async buildRegisterTransaction(
     dto: RegisterRanchDto,
     rancherPubkeyStr: string,
   ): Promise<{ transaction: string; latestBlockhash: any }> {
+    this.logger.log(`Building 'register_ranch' tx for ${rancherPubkeyStr}`);
     const rancherPubkey = new PublicKey(rancherPubkeyStr);
     const program = this.solanaService.getProgram();
 
@@ -58,8 +59,8 @@ export class RanchService {
     const instruction = await program.methods
       .registerRanch(dto.name, { [dto.country]: {} })
       .accounts({
-        authority: rancherPubkey, 
-        ranchProfile: ranchPda,
+        authority: rancherPubkey,
+        ranchProfile: ranchPda, 
       } as any)
       .instruction();
 
@@ -67,12 +68,12 @@ export class RanchService {
       await this.solanaService.connection.getLatestBlockhash();
 
     const tx = new Transaction({
-      feePayer: rancherPubkey, 
+      feePayer: rancherPubkey,
       blockhash: latestBlockhash.blockhash,
       lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
     });
     tx.add(instruction);
-    
+
     const serializedTx = tx.serialize({
       requireAllSignatures: false,
     });
@@ -90,6 +91,7 @@ export class RanchService {
     dto: ConfirmRanchDto,
     rancherPubkeyStr: string,
   ): Promise<Ranch> {
+    console.log('>>> [RANCH SERVICE] rancherPubkeyStr received:', rancherPubkeyStr); // <-- AGREGAR
     const rancherPubkey = new PublicKey(rancherPubkeyStr);
     const { txid, latestBlockhash } = dto;
     const program = this.solanaService.getProgram();
@@ -105,6 +107,9 @@ export class RanchService {
       );
 
     if (confirmation.value.err) {
+      this.logger.warn(
+        `'register_ranch' TX ${txid} failed to confirm: ${confirmation.value.err}`,
+      );
       throw new BadRequestException('Transaction failed to confirm on-chain.');
     }
     this.logger.log(`Confirmed 'register_ranch' TX: ${txid}`);
@@ -116,16 +121,26 @@ export class RanchService {
 
     let onChainData;
     try {
-      onChainData =
-        await program.account.ranchProfile.fetch(ranchPda);
+      onChainData = await program.account.ranchProfile.fetch(ranchPda);
     } catch (e) {
+      this.logger.error(
+        `Failed to fetch ranch PDA ${ranchPda.toBase58()} after confirmation. TX: ${txid}`,
+        e.stack,
+      );
       throw new NotFoundException('Ranch account not found after confirmation.');
     }
 
+    this.logger.debug(`Confirming registration for pubkey: ${rancherPubkeyStr}`);
+    const usersInDb = await this.userRepository.find(); // Ver TODOS los usuarios
+    this.logger.debug(`Users currently in DB: ${JSON.stringify(usersInDb.map(u => u.pubkey))}`);
+    
     const user = await this.userRepository.findOne({
       where: { pubkey: rancherPubkeyStr },
     });
     if (!user) {
+      this.logger.error(
+        `User ${rancherPubkeyStr} not found in DB after TX ${txid} confirmation.`,
+      );
       throw new NotFoundException('User not found in database.');
     }
 
@@ -134,14 +149,18 @@ export class RanchService {
       user: user,
       name: onChainData.name,
       country: Object.keys(onChainData.country)[0],
-      isVerified: onChainData.isVerified, 
+      isVerified: onChainData.isVerified,
       animalCount: Number(onChainData.animalCount),
     });
     await this.ranchRepository.save(newRanch);
+    this.logger.log(
+      `Ranch ${onChainData.name} (PDA: ${ranchPda.toBase58()}) saved to DB.`,
+    );
 
     if (!user.roles.includes(UserRole.RANCHER)) {
       user.roles.push(UserRole.RANCHER);
       await this.userRepository.save(user);
+      this.logger.log(`Role RANCHER added to user ${user.pubkey}`);
     }
 
     return newRanch;
@@ -151,23 +170,28 @@ export class RanchService {
     const program = this.solanaService.getProgram();
     const ranchPda = new PublicKey(pdaToVerify);
 
-    this.logger.log(`Admin verifying ranch: ${pdaToVerify}`);
-    
+    this.logger.log(
+      `Admin (SuperAuthority) verifying ranch: ${pdaToVerify}`,
+    );
+
     try {
       const txid = await program.methods
         .verifyRanch()
         .accounts({
-          superAuthority: this.adminKeypair.publicKey, 
+          superAuthority: this.adminKeypair.publicKey,
           ranchProfile: ranchPda,
-        })
-        .signers([this.adminKeypair]) 
+        } as any)
         .rpc({ commitment: 'confirmed' });
 
       this.logger.log(`Confirmed 'verify_ranch' TX: ${txid}`);
-    
     } catch (error) {
-      this.logger.error(`Failed to verify ranch ${pdaToVerify}`, error);
-      throw new InternalServerErrorException('On-chain verification failed.');
+      this.logger.error(
+        `Failed to verify ranch ${pdaToVerify}: ${error.message}`,
+        error.stack,
+      );
+      throw new InternalServerErrorException(
+        `On-chain verification failed: ${error.message}`,
+      );
     }
 
     const ranchInDb = await this.ranchRepository.findOne({
@@ -179,10 +203,12 @@ export class RanchService {
     }
 
     ranchInDb.isVerified = true;
+    this.logger.log(`Ranch ${ranchInDb.name} updated to 'isVerified: true' in DB`);
     return this.ranchRepository.save(ranchInDb);
   }
 
   async findAll(): Promise<Ranch[]> {
+    this.logger.log('Fetching all ranches');
     return this.ranchRepository.find();
   }
 
@@ -193,6 +219,7 @@ export class RanchService {
     });
 
     if (!ranch) {
+      this.logger.warn(`No ranch profile found for user ${rancherPubkey}`);
       throw new NotFoundException('No ranch profile found for this user.');
     }
     return ranch;

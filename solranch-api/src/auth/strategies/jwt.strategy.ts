@@ -29,6 +29,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!payload.sub || !payload.roles) {
       throw new UnauthorizedException('Invalid Payload');
     }
+    console.log('>>> [JWT STRATEGY] Returning user:', { pubkey: payload.sub, roles: payload.roles });
     return { pubkey: payload.sub, roles: payload.roles };
   }
 }
