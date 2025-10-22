@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, MaxLength, IsIn, IsEnum } from 'class-validator';
+import { IsString, IsNotEmpty, MaxLength, IsEnum } from 'class-validator';
 import { Country } from '../enums/country.enum';
 
 export class RegisterRanchDto {
