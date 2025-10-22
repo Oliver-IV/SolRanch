@@ -91,7 +91,6 @@ export class RanchService {
     dto: ConfirmRanchDto,
     rancherPubkeyStr: string,
   ): Promise<Ranch> {
-    console.log('>>> [RANCH SERVICE] rancherPubkeyStr received:', rancherPubkeyStr); // <-- AGREGAR
     const rancherPubkey = new PublicKey(rancherPubkeyStr);
     const { txid, latestBlockhash } = dto;
     const program = this.solanaService.getProgram();
@@ -129,10 +128,6 @@ export class RanchService {
       );
       throw new NotFoundException('Ranch account not found after confirmation.');
     }
-
-    this.logger.debug(`Confirming registration for pubkey: ${rancherPubkeyStr}`);
-    const usersInDb = await this.userRepository.find(); // Ver TODOS los usuarios
-    this.logger.debug(`Users currently in DB: ${JSON.stringify(usersInDb.map(u => u.pubkey))}`);
     
     const user = await this.userRepository.findOne({
       where: { pubkey: rancherPubkeyStr },

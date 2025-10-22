@@ -1,5 +1,3 @@
-// 📍 Archivo: src/ranch/ranch.controller.ts
-
 import {
   Controller,
   Post,

@@ -1,5 +1,3 @@
-// 📍 File: src/solana/solana.module.ts
-
 import { Global, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { SolanaService } from './solana.service';
