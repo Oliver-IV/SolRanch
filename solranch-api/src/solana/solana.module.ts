@@ -1,7 +1,15 @@
-import { Module } from '@nestjs/common';
+// 📍 File: src/solana/solana.module.ts
+
+import { Global, Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { SolanaService } from './solana.service';
 
+@Global()
 @Module({
-  providers: [SolanaService]
+  imports: [
+    ConfigModule,
+  ],
+  providers: [SolanaService],
+  exports: [SolanaService],
 })
 export class SolanaModule {}
