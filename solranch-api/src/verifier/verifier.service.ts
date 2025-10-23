@@ -13,7 +13,7 @@ import bs58 from 'bs58';
 
 import { SolanaService } from '../solana/solana.service';
 import { Verifier } from './entities/verifier.entity';
-import { User } from '../auth/entities/user.entity';
+import { User, UserRole } from '../auth/entities/user.entity';
 import { RegisterVerifierDto } from './dto/register-verifier.dto';
 @Injectable()
 export class VerifierService {
@@ -88,8 +88,8 @@ export class VerifierService {
       const txid = await program.methods
         .registerVerifier(verifierPubkey, dto.name)
         .accounts({
-          verifier_profile: verifierPda,
-          super_authority: this.superAuthorityKeypair.publicKey,
+          verifierProfile: verifierPda,
+          superAuthority: this.superAuthorityKeypair.publicKey,
         } as any)
         .signers([this.superAuthorityKeypair])
         .rpc({ commitment: 'confirmed' });
@@ -105,8 +105,7 @@ export class VerifierService {
       );
     }
 
-    const onChainData =
-      await program.account.verifierProfile.fetch(verifierPda);
+    const onChainData = await program.account.verifierProfile.fetch(verifierPda);
 
     const newVerifier = this.verifierRepository.create({
       pda: verifierPda.toBase58(),
@@ -115,7 +114,15 @@ export class VerifierService {
       isActive: onChainData.isActive,
     });
 
-    return this.verifierRepository.save(newVerifier);
+    await this.verifierRepository.save(newVerifier);
+
+    if (!user.roles.includes(UserRole.VERIFIER)) {
+      user.roles.push(UserRole.VERIFIER);
+      await this.userRepository.save(user);
+      this.logger.log(`Role VERIFIER added to user ${user.pubkey}`);
+    }
+
+    return newVerifier;
   }
 
   async findAll(): Promise<Verifier[]> {

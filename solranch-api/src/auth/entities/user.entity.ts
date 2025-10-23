@@ -14,6 +14,7 @@ import { Ranch } from '../../ranch/entities/ranch.entity';
 export enum UserRole {
   RANCHER = 'RANCHER',
   USER = 'USER',
+  VERIFIER = 'VERIFIER'
 }
 
 @Entity('users')

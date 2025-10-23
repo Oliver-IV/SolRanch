@@ -8,6 +8,7 @@ import {
 } from 'typeorm';
 
 export enum TxStatus {
+  PENDING_RANCHER_SIGNATURE = 'pending_rancher_signature',
   PENDING_VERIFIER_SIGNATURE = 'pending_verifier_signature',
   COMPLETED = 'completed',
   FAILED = 'failed',
@@ -36,7 +37,7 @@ export class PendingTransaction {
   @Column({
     type: 'enum',
     enum: TxStatus,
-    default: TxStatus.PENDING_VERIFIER_SIGNATURE,
+    default: TxStatus.PENDING_RANCHER_SIGNATURE,
   })
   status: TxStatus;
 

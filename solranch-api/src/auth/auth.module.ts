@@ -9,10 +9,13 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { AdminGuard } from './guards/admin.guard';
 import { RanchModule } from '../ranch/ranch.module';
+import { Verifier } from '../verifier/entities/verifier.entity';
+import { VerifierGuard } from './guards/verifier.guard';
+import { RancherGuard } from './guards/rancher.guard';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User]),
+    TypeOrmModule.forFeature([User, Verifier]),
     ConfigModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
@@ -35,8 +38,10 @@ import { RanchModule } from '../ranch/ranch.module';
   providers: [
     AuthService, 
     JwtStrategy, 
-    AdminGuard
+    AdminGuard,
+    VerifierGuard,
+    RancherGuard
   ],
-  exports: [PassportModule, AuthService, AdminGuard],
+  exports: [PassportModule, AuthService, AdminGuard, VerifierGuard, RancherGuard],
 })
 export class AuthModule {}
