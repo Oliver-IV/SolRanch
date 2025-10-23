@@ -1,4 +1,3 @@
-// 📍 Archivo: src/animal/dto/confirm-animal.dto.ts
 import { Type } from 'class-transformer';
 import {
   IsString,

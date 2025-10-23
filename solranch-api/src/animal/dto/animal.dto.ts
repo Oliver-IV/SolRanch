@@ -5,6 +5,7 @@ import {
   Length,
   IsNumberString,
 } from 'class-validator';
+import { IsSolanaAddress } from 'src/utils/solana-address.validator';
 
 export class RegisterAnimalDraftDto {
   @IsString()
@@ -28,8 +29,6 @@ export class RegisterAnimalDraftDto {
 
   @IsString()
   @IsNotEmpty()
-  @Length(43, 44, {
-    message: 'Pubkey must hace 43 or 44 chars',
-  })
+  @IsSolanaAddress()
   verifierPubkey: string;
 }

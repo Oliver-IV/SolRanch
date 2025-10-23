@@ -1,12 +1,9 @@
-import { IsString, IsNotEmpty, Length, IsNumberString } from 'class-validator';
+import { Type } from "class-transformer";
+import { IsNumber, Min } from "class-validator";
 
 export class SetAnimalPriceDto {
-  @IsString()
-  @IsNotEmpty()
-  @Length(43, 44)
-  animalPda: string;
-
-  @IsNumberString()
-  @IsNotEmpty()
-  price: string;
+  @IsNumber()
+  @Min(0) 
+  @Type(() => Number) 
+  price: number; 
 }

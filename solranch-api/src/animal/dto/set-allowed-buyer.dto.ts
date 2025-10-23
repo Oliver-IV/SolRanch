@@ -1,13 +1,9 @@
 import { IsString, IsNotEmpty, Length } from 'class-validator';
+import { IsSolanaAddress } from '../../utils/solana-address.validator';
 
 export class SetAllowedBuyerDto {
   @IsString()
   @IsNotEmpty()
-  @Length(43, 44)
-  animalPda: string;
-
-  @IsString()
-  @IsNotEmpty()
-  @Length(43, 44)
+  @IsSolanaAddress()
   allowedBuyerPubkey: string;
 }

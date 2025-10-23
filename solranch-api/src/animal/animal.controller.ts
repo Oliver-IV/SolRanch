@@ -1,4 +1,3 @@
-// 📍 Archivo: src/animal/animal.controller.ts
 import {
     Controller,
     Post,
@@ -7,8 +6,8 @@ import {
     Req,
     Param,
     UseGuards,
-    HttpCode, // Añadido para respuestas 200
-    HttpStatus, // Añadido para respuestas 200
+    HttpCode,
+    HttpStatus, 
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { AnimalService } from './animal.service';
@@ -17,6 +16,9 @@ import { CreateAnimalDto } from './dto/create-animal.dto';
 import { AddRancherSignatureDto } from './dto/add-rancher-signature.dto';
 import { ConfirmAnimalDto } from './dto/confirm-animal.dto';
 import { RancherGuard } from '../auth/guards/rancher.guard';
+import { SetAnimalPriceDto } from './dto/set-animal-price.dto';
+import { ConfirmTxDto } from './dto/confirm-tx.dto';
+import { SetAllowedBuyerDto } from './dto/set-allowed-buyer.dto';
 
 // Todas las rutas requieren login
 @UseGuards(AuthGuard('jwt'))
@@ -55,6 +57,42 @@ export class AnimalController {
     @HttpCode(HttpStatus.CREATED)
     confirmRegistration(@Body() dto: ConfirmAnimalDto, @Req() req) {
         return this.animalService.confirmRegistration(dto, req.user.pubkey);
+    }
+
+    @Post(':pda/build-set-price')
+    @HttpCode(HttpStatus.OK)
+    buildSetPriceTx(@Param('pda') pda: string, @Body() dto: SetAnimalPriceDto, @Req() req) {
+        return this.animalService.buildSetPriceTx(pda, dto, req.user.pubkey);
+    }
+
+    @Post(':pda/confirm-set-price')
+    @HttpCode(HttpStatus.OK)
+    confirmSetPrice(@Param('pda') pda: string, @Body() dto: ConfirmTxDto, @Req() req) {
+        return this.animalService.confirmSetPrice(pda, dto, req.user.pubkey);
+    }
+
+    @Post(':pda/build-set-allowed-buyer') 
+    @HttpCode(HttpStatus.OK)
+    buildSetAllowedBuyerTx(@Param('pda') pda: string, @Body() dto: SetAllowedBuyerDto, @Req() req) {
+        return this.animalService.buildSetAllowedBuyerTx(pda, dto, req.user.pubkey);
+    }
+
+    @Post(':pda/confirm-set-allowed-buyer') 
+    @HttpCode(HttpStatus.OK)
+    confirmSetAllowedBuyer(@Param('pda') pda: string, @Body() dto: ConfirmTxDto, @Req() req) {
+        return this.animalService.confirmSetAllowedBuyer(pda, dto, req.user.pubkey);
+    }
+
+    @Post(':pda/build-purchase')
+    @HttpCode(HttpStatus.OK)
+    buildPurchaseTx(@Param('pda') pda: string, @Req() req) {
+        return this.animalService.buildPurchaseTx(pda, req.user.pubkey);
+    }
+
+    @Post(':pda/confirm-purchase')
+    @HttpCode(HttpStatus.OK)
+    confirmPurchase(@Param('pda') pda: string, @Body() dto: ConfirmTxDto, @Req() req) {
+        return this.animalService.confirmPurchase(pda, dto, req.user.pubkey);
     }
 
     @Get(':pda')

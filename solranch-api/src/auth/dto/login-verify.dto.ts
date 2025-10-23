@@ -1,14 +1,12 @@
-import { IsString, IsNotEmpty, Length } from 'class-validator';
+import { IsString, IsNotEmpty } from 'class-validator';
+import { IsSolanaAddress } from '../../utils/solana-address.validator';
 
 export class LoginVerifyDto {
   @IsString()
   @IsNotEmpty()
-  @Length(43, 44, {
-    message: 'Pubkey must have 43 or 44 chars',
-  })
+  @IsSolanaAddress()
   pubkey: string;
 
-  // La firma viene como un string en Base58
   @IsString()
   @IsNotEmpty()
   signature: string;
