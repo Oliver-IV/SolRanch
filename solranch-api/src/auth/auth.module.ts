@@ -12,6 +12,7 @@ import { RanchModule } from '../ranch/ranch.module';
 import { Verifier } from '../verifier/entities/verifier.entity';
 import { VerifierGuard } from './guards/verifier.guard';
 import { RancherGuard } from './guards/rancher.guard';
+import { JwtAuthGuard } from './guards/jwt.guard';
 
 @Module({
   imports: [
@@ -40,8 +41,9 @@ import { RancherGuard } from './guards/rancher.guard';
     JwtStrategy, 
     AdminGuard,
     VerifierGuard,
-    RancherGuard
+    RancherGuard,
+    JwtAuthGuard
   ],
-  exports: [PassportModule, AuthService, AdminGuard, VerifierGuard, RancherGuard],
+  exports: [PassportModule, AuthService, AdminGuard, VerifierGuard, RancherGuard, JwtAuthGuard],
 })
 export class AuthModule {}

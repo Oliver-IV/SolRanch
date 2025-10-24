@@ -8,14 +8,17 @@ import {
   Param,
   HttpCode,
   HttpStatus,
+  Query,
 } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
 import { RanchService } from './ranch.service';
 import { RegisterRanchDto } from './dto/register-ranch.dto';
 import { ConfirmRanchDto } from './dto/confirm-ranch.dto';
 import { AdminGuard } from '../auth/guards/admin.guard';
+import { FindRanchesQueryDto } from './dto/find-ranches-query.dto';
+import { JwtAuthGuard } from '../auth/guards/jwt.guard';
+import { Public } from '../auth/decorators/public.decorator';
 
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(JwtAuthGuard)
 @Controller('ranch')
 export class RanchController {
   constructor(private readonly ranchService: RanchService) {}
@@ -52,8 +55,10 @@ export class RanchController {
     return this.ranchService.findMyRanch(userPubkey);
   }
 
-  @Get()
-  async getAllRanches() {
-    return this.ranchService.findAll();
+  @Get() 
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  findAllWithFilters(@Query() queryDto: FindRanchesQueryDto) {
+    return this.ranchService.findAllWithFilters(queryDto);
   }
 }

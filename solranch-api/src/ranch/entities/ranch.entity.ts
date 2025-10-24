@@ -9,6 +9,7 @@ import {
   JoinColumn,
 } from 'typeorm';
 import { User } from '../../auth/entities/user.entity';
+import { Country } from '../enums/country.enum';
 
 @Entity('ranches')
 export class Ranch {
@@ -26,8 +27,12 @@ export class Ranch {
   @Column()
   name: string;
 
-  @Column()
-  country: string;
+  @Column({
+    type: 'enum',
+    enum: Country, 
+    nullable: false 
+  })
+  country: Country;
 
   @Column({ default: false })
   isVerified: boolean;

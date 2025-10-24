@@ -18,6 +18,8 @@ import { ConfirmRanchDto } from './dto/confirm-ranch.dto';
 import { Ranch } from './entities/ranch.entity';
 import { User, UserRole } from '../auth/entities/user.entity';
 import { AuthService } from '../auth/services/auth.service';
+import { FindRanchesQueryDto } from './dto/find-ranches-query.dto';
+import { Country } from './enums/country.enum';
 
 @Injectable()
 export class RanchService {
@@ -36,7 +38,7 @@ export class RanchService {
   ) {
     const adminSecret = this.configService.get<string>('ADMIN_SECRET_KEY');
     if (!adminSecret) {
-      this.logger.error('ADMIN_SECRET_KEY not set'); 
+      this.logger.error('ADMIN_SECRET_KEY not set');
       throw new InternalServerErrorException('ADMIN_SECRET_KEY not set');
     }
     this.adminKeypair = Keypair.fromSecretKey(bs58.decode(adminSecret));
@@ -60,7 +62,7 @@ export class RanchService {
       .registerRanch(dto.name, { [dto.country]: {} })
       .accounts({
         authority: rancherPubkey,
-        ranchProfile: ranchPda, 
+        ranchProfile: ranchPda,
       } as any)
       .instruction();
 
@@ -128,7 +130,7 @@ export class RanchService {
       );
       throw new NotFoundException('Ranch account not found after confirmation.');
     }
-    
+
     const user = await this.userRepository.findOne({
       where: { pubkey: rancherPubkeyStr },
     });
@@ -139,11 +141,20 @@ export class RanchService {
       throw new NotFoundException('User not found in database.');
     }
 
+    const countryKeyString = Object.keys(onChainData.country)[0];
+
+    const countryEnumValue = Country[countryKeyString.toUpperCase() as keyof typeof Country];
+
+    if (!countryEnumValue) {
+      this.logger.error(`Invalid country key '${countryKeyString}' received from blockchain.`);
+      throw new InternalServerErrorException(`Invalid country data received from blockchain.`);
+    }
+
     const newRanch = this.ranchRepository.create({
       pda: ranchPda.toBase58(),
       user: user,
       name: onChainData.name,
-      country: Object.keys(onChainData.country)[0],
+      country: countryEnumValue, // <-- Assign the Enum value here
       isVerified: onChainData.isVerified,
       animalCount: Number(onChainData.animalCount),
     });
@@ -202,9 +213,47 @@ export class RanchService {
     return this.ranchRepository.save(ranchInDb);
   }
 
-  async findAll(): Promise<Ranch[]> {
-    this.logger.log('Fetching all ranches');
-    return this.ranchRepository.find();
+  async findAllWithFilters(
+    queryDto: FindRanchesQueryDto,
+  ): Promise<{ data: Ranch[]; total: number; page: number; limit: number }> {
+    const {
+      page = 1,
+      limit = 10,
+      name,
+      country,
+      isVerified,
+    } = queryDto;
+
+    const skip = (page - 1) * limit;
+
+    const queryBuilder = this.ranchRepository.createQueryBuilder('ranch')
+      .leftJoinAndSelect('ranch.user', 'user');
+
+    if (name) {
+      queryBuilder.andWhere('ranch.name ILIKE :name', { name: `%${name}%` });
+    }
+
+    if (country) {
+      queryBuilder.andWhere('ranch.country = :country', { country });
+    }
+
+    if (isVerified !== undefined) {
+      queryBuilder.andWhere('ranch.isVerified = :isVerified', { isVerified });
+    }
+
+    queryBuilder.orderBy('ranch.createdAt', 'DESC');
+    queryBuilder.skip(skip).take(limit);
+
+    const [data, total] = await queryBuilder.getManyAndCount();
+
+    this.logger.log(`Found ${total} ranches matching filters, returning page ${page}/${Math.ceil(total / limit)}`);
+
+    return { data, total, page, limit };
+  }
+
+  async findAllSimple(): Promise<Ranch[]> {
+    this.logger.log('Fetching all ranches (simple)');
+    return this.ranchRepository.find({ relations: ['user'] });
   }
 
   async findMyRanch(rancherPubkey: string): Promise<Ranch> {

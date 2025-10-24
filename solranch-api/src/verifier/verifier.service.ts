@@ -15,6 +15,7 @@ import { SolanaService } from '../solana/solana.service';
 import { Verifier } from './entities/verifier.entity';
 import { User, UserRole } from '../auth/entities/user.entity';
 import { RegisterVerifierDto } from './dto/register-verifier.dto';
+import { FindVerifiersQueryDto } from './dto/find-verifiers-query.dto';
 @Injectable()
 export class VerifierService {
   private readonly logger = new Logger(VerifierService.name);
@@ -125,11 +126,45 @@ export class VerifierService {
     return newVerifier;
   }
 
-  async findAll(): Promise<Verifier[]> {
-    return this.verifierRepository.find({
-      relations: {
-        user: true,
-      },
-    });
+  async findAllWithFilters(
+    queryDto: FindVerifiersQueryDto,
+  ): Promise<{ data: Verifier[]; total: number; page: number; limit: number }> {
+    const {
+      page = 1,
+      limit = 10,
+      name,
+      isActive,
+    } = queryDto;
+
+    const skip = (page - 1) * limit;
+
+    const queryBuilder = this.verifierRepository.createQueryBuilder('verifier')
+      .leftJoinAndSelect('verifier.user', 'user');
+
+    if (name) {
+      queryBuilder.andWhere('verifier.name ILIKE :name', { name: `%${name}%` });
+    }
+
+    if (isActive !== undefined) {
+      queryBuilder.andWhere('verifier.isActive = :isActive', { isActive });
+    }
+
+    queryBuilder.orderBy('verifier.createdAt', 'DESC');
+    queryBuilder.skip(skip).take(limit);
+
+    const [data, total] = await queryBuilder.getManyAndCount();
+
+    this.logger.log(`Found ${total} verifiers matching filters, returning page ${page}/${Math.ceil(total / limit)}`);
+
+    return { data, total, page, limit };
+  }
+
+  async findAllSimple(): Promise<Verifier[]> {
+     this.logger.log('Fetching all verifiers (simple)');
+     return this.verifierRepository.find({
+       relations: {
+         user: true,
+       },
+     });
   }
 }

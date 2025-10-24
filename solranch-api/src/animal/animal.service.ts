@@ -27,6 +27,7 @@ import { SolranchAnchor } from '../solana/idl/solranch_anchor';
 import { SetAnimalPriceDto } from './dto/set-animal-price.dto';
 import { ConfirmTxDto } from './dto/confirm-tx.dto';
 import { SetAllowedBuyerDto } from './dto/set-allowed-buyer.dto';
+import { FindAnimalsQueryDto } from './dto/find-animals-query.dto';
 
 @Injectable()
 export class AnimalService {
@@ -604,12 +605,62 @@ export class AnimalService {
         return animal;
     }
 
-    async findAnimalsByRanch(ranchPdaStr: string): Promise<Animal[]> {
-        return this.animalRepository.find({
-            where: { originRanch: { pda: ranchPdaStr } },
-            relations: ['owner'],
-            order: { createdAt: 'DESC' }
-        });
+    async findAllWithFilters(
+    queryDto: FindAnimalsQueryDto,
+  ): Promise<{ data: Animal[]; total: number; page: number; limit: number }> {
+    const {
+      page = 1,
+      limit = 10,
+      specie,
+      breed,
+      ranchPda,
+      isOnSale,
+      minPrice,
+      maxPrice,
+    } = queryDto;
+
+    const skip = (page - 1) * limit;
+
+    const queryBuilder = this.animalRepository.createQueryBuilder('animal')
+      .leftJoinAndSelect('animal.owner', 'owner')
+      .leftJoinAndSelect('animal.originRanch', 'originRanch');
+
+    if (specie) {
+      queryBuilder.andWhere('animal.specie ILIKE :specie', { specie: `%${specie}%` });
     }
+
+    if (breed) {
+      queryBuilder.andWhere('animal.breed ILIKE :breed', { breed: `%${breed}%` });
+    }
+
+    if (ranchPda) {
+      queryBuilder.andWhere('originRanch.pda = :ranchPda', { ranchPda });
+    }
+
+    if (isOnSale !== undefined) {
+      if (isOnSale) {
+        queryBuilder.andWhere('animal.salePrice IS NOT NULL');
+      } else {
+        queryBuilder.andWhere('animal.salePrice IS NULL');
+      }
+    }
+
+    if (minPrice !== undefined && maxPrice !== undefined) {
+      queryBuilder.andWhere('CAST(animal.salePrice AS BIGINT) BETWEEN :minPrice AND :maxPrice', { minPrice, maxPrice });
+    } else if (minPrice !== undefined) {
+      queryBuilder.andWhere('CAST(animal.salePrice AS BIGINT) >= :minPrice', { minPrice });
+    } else if (maxPrice !== undefined) {
+      queryBuilder.andWhere('CAST(animal.salePrice AS BIGINT) <= :maxPrice', { maxPrice });
+    }
+
+    queryBuilder.orderBy('animal.createdAt', 'DESC');
+    queryBuilder.skip(skip).take(limit);
+
+    const [data, total] = await queryBuilder.getManyAndCount();
+
+    this.logger.log(`Found ${total} animals matching filters, returning page ${page}/${Math.ceil(total / limit)}`);
+
+    return { data, total, page, limit };
+  }
 
 }

@@ -4,7 +4,7 @@ import {
   Body,
   HttpCode,
   HttpStatus,
-  Res, // 1. Importar Res
+  Res,
   UseGuards,
   Get,
   Req,
@@ -57,7 +57,6 @@ export class AuthController {
   @Get('me')
   @UseGuards(AuthGuard('jwt'))
   getProfile(@Req() req) {
-    console.log('>>> [CONTROLLER] req.user:', req.user)
     return this.authService.getProfile(req.user);
   }
 }

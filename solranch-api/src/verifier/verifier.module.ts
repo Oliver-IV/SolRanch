@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Verifier } from './entities/verifier.entity';
 import { User } from '../auth/entities/user.entity';
@@ -12,6 +12,7 @@ import { ConfigModule } from '@nestjs/config';
     ConfigModule,
     TypeOrmModule.forFeature([Verifier, User]),
     AuthModule, 
+    forwardRef(() => AuthModule)
   ],
   controllers: [VerifierController],
   providers: [VerifierService],

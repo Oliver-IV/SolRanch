@@ -7,7 +7,8 @@ import {
     Param,
     UseGuards,
     HttpCode,
-    HttpStatus, 
+    HttpStatus,
+    Query, 
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { AnimalService } from './animal.service';
@@ -19,9 +20,11 @@ import { RancherGuard } from '../auth/guards/rancher.guard';
 import { SetAnimalPriceDto } from './dto/set-animal-price.dto';
 import { ConfirmTxDto } from './dto/confirm-tx.dto';
 import { SetAllowedBuyerDto } from './dto/set-allowed-buyer.dto';
+import { FindAnimalsQueryDto } from './dto/find-animals-query.dto';
+import { JwtAuthGuard } from '../auth/guards/jwt.guard';
+import { Public } from '../auth/decorators/public.decorator';
 
-// Todas las rutas requieren login
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(JwtAuthGuard)
 @Controller('animal')
 export class AnimalController {
     constructor(private readonly animalService: AnimalService) { }
@@ -96,13 +99,16 @@ export class AnimalController {
     }
 
     @Get(':pda')
+    @Public()
     findAnimalByPda(@Param('pda') pda: string) {
         return this.animalService.findAnimalByPda(pda);
     }
 
-    @Get('by-ranch/:ranchPda')
-    findAnimalsByRanch(@Param('ranchPda') ranchPda: string) {
-        return this.animalService.findAnimalsByRanch(ranchPda);
+    @Get()
+    @HttpCode(HttpStatus.OK)
+    @Public()
+    findAllWithFilters(@Query() queryDto: FindAnimalsQueryDto) {
+        return this.animalService.findAllWithFilters(queryDto);
     }
 
 }

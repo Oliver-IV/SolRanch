@@ -7,30 +7,34 @@ import {
   HttpCode,
   HttpStatus,
   Req,
+  Query,
 } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { VerifierService } from './verifier.service';
 import { RegisterVerifierDto } from './dto/register-verifier.dto';
+import { JwtAuthGuard } from '../auth/guards/jwt.guard';
+import { Public } from '../auth/decorators/public.decorator';
+import { FindVerifiersQueryDto } from './dto/find-verifiers-query.dto';
 
+@UseGuards(JwtAuthGuard)
 @Controller('verifiers')
 export class VerifierController {
-  constructor(private readonly verifierService: VerifierService) {}
+  constructor(private readonly verifierService: VerifierService) { }
 
-  @Get('me')
-  @UseGuards(AuthGuard('jwt'))
-  checkVerifierStatus(@Req() req) {
-    return this.verifierService.getVerifierStatus(req.user.sub);
+  @Public()
+  @Get()
+  @HttpCode(HttpStatus.OK)
+  findAllWithFilters(@Query() queryDto: FindVerifiersQueryDto) {
+    return this.verifierService.findAllWithFilters(queryDto);
   }
 
-  @Get()
-  @UseGuards(AuthGuard('jwt'), AdminGuard)
-  findAll() {
-    return this.verifierService.findAll();
+  @Get('me')
+  getVerifierStatus(@Req() req) {
+    return this.verifierService.getVerifierStatus(req.user.pubkey);
   }
 
   @Post('register')
-  @UseGuards(AuthGuard('jwt'), AdminGuard)
+  @UseGuards(AdminGuard)
   @HttpCode(HttpStatus.CREATED)
   register(@Body() dto: RegisterVerifierDto) {
     return this.verifierService.register(dto);
