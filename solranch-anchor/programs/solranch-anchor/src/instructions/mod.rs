@@ -5,6 +5,10 @@ pub mod set_allowed_animal_buyer;
 pub mod set_animal_price;
 pub mod register_verifier;
 pub mod verify_ranch;
+pub mod approve_animal;
+pub mod set_ranch_verification;
+pub mod toggle_verifier_status;
+pub mod cancel_animal_registration;
 
 pub use purchase_animal::*;
 pub use register_animal::*;
@@ -13,3 +17,7 @@ pub use set_allowed_animal_buyer::*;
 pub use set_animal_price::*;
 pub use register_verifier::*;
 pub use verify_ranch::*;
+pub use approve_animal::*;
+pub use set_ranch_verification::*;
+pub use toggle_verifier_status::*;
+pub use cancel_animal_registration::*;

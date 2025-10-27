@@ -7,7 +7,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { User, UserRole } from '../entities/user.entity';
 import { Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
-import { LoginVerifyDto } from '../dto/login-verify.dto'; 
+import { LoginVerifyDto } from '../dto/login-verify.dto';
 import { v4 as uuidv4 } from 'uuid';
 import nacl from 'tweetnacl';
 import bs58 from 'bs58';
@@ -114,13 +114,34 @@ export class AuthService {
 
   async getProfile(userPayload: { pubkey: string; roles: UserRole[] }) {
     const pubkey = userPayload.pubkey;
+    const user = await this.userRepository.findOne({ where: { pubkey } });
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
     const isAdmin = pubkey === this.adminPubkey;
-    const profileData = {
-      pubkey: pubkey,
-      roles: userPayload.roles,
+    return {
+      pubkey: user.pubkey,
+      roles: user.roles,
       isAdmin: isAdmin,
     };
-    return profileData;
+  }
+
+  async refreshToken(pubkey: string): Promise<{ accessToken: string }> {
+    const user = await this.userRepository.findOne({ where: { pubkey } });
+
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+    
+    const payload = {
+      sub: user.pubkey,
+      roles: user.roles,
+    };
+
+    const accessToken = this.jwtService.sign(payload);
+    this.logger.log(`Token refreshed for user ${pubkey} with roles: ${user.roles.join(', ')}`);
+
+    return { accessToken };
   }
 
   private createSignMessage(nonce: string): string {

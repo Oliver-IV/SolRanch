@@ -17,7 +17,7 @@ import type { Response } from 'express';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(private readonly authService: AuthService) { }
 
   @Post('login-request')
   @HttpCode(HttpStatus.OK)
@@ -34,10 +34,10 @@ export class AuthController {
     const { accessToken } = await this.authService.login(dto);
 
     res.cookie('auth_token', accessToken, {
-      httpOnly: true, 
-      secure: process.env.NODE_ENV === 'production', 
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
-      maxAge: 3600000 * 24, 
+      maxAge: 3600000 * 24,
     });
 
     return { status: 'success', message: 'Logged in' };
@@ -52,6 +52,26 @@ export class AuthController {
       sameSite: 'strict',
     });
     return { status: 'success', message: 'Logged out' };
+  }
+
+  @Post('refresh-token')
+  @UseGuards(AuthGuard('jwt'))
+  @HttpCode(HttpStatus.OK)
+  async refreshToken(
+    @Req() req,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const pubkey = req.user.pubkey;
+    const refreshed = await this.authService.refreshToken(pubkey);
+
+    res.cookie('auth_token', refreshed.accessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 3600000 * 24,
+    });
+
+    return { status: 'success', message: 'Token refreshed' };
   }
 
   @Get('me')

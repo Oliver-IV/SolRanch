@@ -30,9 +30,21 @@ export class PendingTransaction {
   @Column()
   verifierPubkey: string;
 
-  @Index({ unique: true })
+  @Index()
   @Column()
   animalPda: string;
+
+  @Column({ nullable: true })
+  id_chip: string;
+
+  @Column({ nullable: true })
+  specie: string;
+
+  @Column({ nullable: true })
+  breed: string;
+
+  @Column({ type: 'timestamp', nullable: true })
+  birth_date: Date;
 
   @Column({
     type: 'enum',
@@ -46,6 +58,12 @@ export class PendingTransaction {
 
   @Column({ nullable: true })
   finalTxSignature: string;
+
+  @Column({ nullable: true })  
+  blockhash: string;
+
+  @Column({ nullable: true }) 
+  lastValidBlockHeight: number;
 
   @CreateDateColumn()
   createdAt: Date;

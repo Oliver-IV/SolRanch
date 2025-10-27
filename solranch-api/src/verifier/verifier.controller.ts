@@ -8,6 +8,7 @@ import {
   HttpStatus,
   Req,
   Query,
+  Param,
 } from '@nestjs/common';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { VerifierService } from './verifier.service';
@@ -38,5 +39,12 @@ export class VerifierController {
   @HttpCode(HttpStatus.CREATED)
   register(@Body() dto: RegisterVerifierDto) {
     return this.verifierService.register(dto);
+  }
+
+  @Post('toggle-status/:pda')
+  @UseGuards(AdminGuard)
+  @HttpCode(HttpStatus.OK)
+  async toggleVerifierStatus(@Param('pda') pda: string) {
+    return this.verifierService.toggleVerifierStatus(pda);
   }
 }

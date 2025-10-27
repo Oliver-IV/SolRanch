@@ -8,6 +8,162 @@
   },
   "instructions": [
     {
+      "name": "approve_animal",
+      "discriminator": [
+        34,
+        204,
+        182,
+        113,
+        55,
+        238,
+        168,
+        97
+      ],
+      "accounts": [
+        {
+          "name": "animal",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  110,
+                  99,
+                  104,
+                  95,
+                  97,
+                  110,
+                  105,
+                  109,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "animal.origin_ranch",
+                "account": "Animal"
+              },
+              {
+                "kind": "account",
+                "path": "animal.id",
+                "account": "Animal"
+              }
+            ]
+          }
+        },
+        {
+          "name": "assigned_verifier",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "animal"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "cancel_animal_registration",
+      "discriminator": [
+        3,
+        74,
+        211,
+        215,
+        3,
+        23,
+        137,
+        167
+      ],
+      "accounts": [
+        {
+          "name": "animal",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  110,
+                  99,
+                  104,
+                  95,
+                  97,
+                  110,
+                  105,
+                  109,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "animal.origin_ranch",
+                "account": "Animal"
+              },
+              {
+                "kind": "account",
+                "path": "animal.id",
+                "account": "Animal"
+              }
+            ]
+          }
+        },
+        {
+          "name": "ranch_profile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  110,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "animal.owner",
+                "account": "Animal"
+              }
+            ]
+          }
+        },
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "authority",
+          "relations": [
+            "ranch_profile"
+          ]
+        },
+        {
+          "name": "receiver",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "purchase_animal",
       "discriminator": [
         89,
@@ -143,7 +299,8 @@
               },
               {
                 "kind": "account",
-                "path": "verifier"
+                "path": "verifier_profile.authority",
+                "account": "VerifierProfile"
               }
             ]
           }
@@ -159,11 +316,6 @@
           "relations": [
             "ranch_profile"
           ]
-        },
-        {
-          "name": "verifier",
-          "writable": true,
-          "signer": true
         },
         {
           "name": "system_program",
@@ -447,6 +599,102 @@
       ]
     },
     {
+      "name": "set_ranch_verification",
+      "discriminator": [
+        15,
+        208,
+        5,
+        18,
+        219,
+        195,
+        180,
+        54
+      ],
+      "accounts": [
+        {
+          "name": "ranch_profile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  110,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "ranch_profile.authority",
+                "account": "RanchProfile"
+              }
+            ]
+          }
+        },
+        {
+          "name": "super_authority",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "is_verified",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "toggle_verifier_status",
+      "discriminator": [
+        83,
+        181,
+        176,
+        225,
+        133,
+        59,
+        167,
+        58
+      ],
+      "accounts": [
+        {
+          "name": "verifier_profile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  101,
+                  114,
+                  105,
+                  102,
+                  105,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "verifier_profile.authority",
+                "account": "VerifierProfile"
+              }
+            ]
+          }
+        },
+        {
+          "name": "super_authority",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "verify_ranch",
       "discriminator": [
         19,
@@ -516,39 +764,78 @@
   "errors": [
     {
       "code": 6000,
-      "name": "InvalidVerifierError"
+      "name": "InvalidVerifierError",
+      "msg": "Invalid verifier profile provided."
     },
     {
       "code": 6001,
-      "name": "InactiveVerifierError"
+      "name": "InactiveVerifierError",
+      "msg": "Verifier is not active."
     },
     {
       "code": 6002,
-      "name": "RanchNotVerifiedError"
+      "name": "RanchNotVerifiedError",
+      "msg": "Ranch must be verified to register animals."
     },
     {
       "code": 6003,
-      "name": "InvalidOwnerError"
+      "name": "InvalidOwnerError",
+      "msg": "Signer is not the owner of the account."
     },
     {
       "code": 6004,
-      "name": "InvalidRanchDataError"
+      "name": "InvalidRanchDataError",
+      "msg": "Invalid name or country for ranch."
     },
     {
       "code": 6005,
-      "name": "InvalidAnimalDataError"
+      "name": "InvalidAnimalDataError",
+      "msg": "Invalid ID chip, specie, or breed for animal."
     },
     {
       "code": 6006,
-      "name": "AnimalNotForSaleError"
+      "name": "AnimalNotForSaleError",
+      "msg": "Animal is not currently listed for sale."
     },
     {
       "code": 6007,
-      "name": "UnauthorizedError"
+      "name": "UnauthorizedError",
+      "msg": "Unauthorized access."
     },
     {
       "code": 6008,
-      "name": "RanchAlreadyVerifiedError"
+      "name": "RanchAlreadyVerifiedError",
+      "msg": "Ranch is already verified."
+    },
+    {
+      "code": 6009,
+      "name": "AnimalAlreadyVerifiedError",
+      "msg": "Animal is already verified."
+    },
+    {
+      "code": 6010,
+      "name": "UnauthorizedVerifierError",
+      "msg": "Signer is not the assigned verifier for this animal."
+    },
+    {
+      "code": 6011,
+      "name": "OverflowError",
+      "msg": "Operation resulted in an arithmetic overflow."
+    },
+    {
+      "code": 6012,
+      "name": "NoStatusChangeError",
+      "msg": "Ranch verification status is already set to the desired value."
+    },
+    {
+      "code": 6013,
+      "name": "UnauthorizedCancellationSignerError",
+      "msg": "Only the ranch authority or assigned verifier can cancel."
+    },
+    {
+      "code": 6014,
+      "name": "CannotCancelVerifiedAnimalError",
+      "msg": "Cannot cancel an animal that is already verified."
     }
   ],
   "types": [
@@ -580,6 +867,14 @@
           {
             "name": "breed",
             "type": "string"
+          },
+          {
+            "name": "is_verified",
+            "type": "bool"
+          },
+          {
+            "name": "assigned_verifier",
+            "type": "pubkey"
           },
           {
             "name": "birth_date",

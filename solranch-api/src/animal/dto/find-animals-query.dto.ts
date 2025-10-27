@@ -6,9 +6,11 @@ import {
   IsNumber,
   Min,
   IsInt,
-  Max, 
+  Max,
+  IsEnum, 
 } from 'class-validator';
 import { Transform } from 'class-transformer'; 
+import { Country } from '../../ranch/enums/country.enum';
 
 export class FindAnimalsQueryDto {
   @IsOptional()
@@ -22,6 +24,10 @@ export class FindAnimalsQueryDto {
   @IsOptional()
   @IsString() 
   ranchPda?: string;
+
+  @IsOptional()
+  @IsEnum(Country)
+  country?: Country;
 
   @IsOptional()
   @IsBoolean()

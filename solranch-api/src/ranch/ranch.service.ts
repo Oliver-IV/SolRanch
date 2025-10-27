@@ -10,7 +10,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
-import { Keypair, PublicKey, Transaction } from '@solana/web3.js';
+import { Keypair, PublicKey, SystemProgram, Transaction } from '@solana/web3.js';
 import bs58 from 'bs58';
 import { SolanaService } from '../solana/solana.service';
 import { RegisterRanchDto } from './dto/register-ranch.dto';
@@ -46,48 +46,47 @@ export class RanchService {
   }
 
   async buildRegisterTransaction(
-    dto: RegisterRanchDto,
-    rancherPubkeyStr: string,
-  ): Promise<{ transaction: string; latestBlockhash: any }> {
-    this.logger.log(`Building 'register_ranch' tx for ${rancherPubkeyStr}`);
-    const rancherPubkey = new PublicKey(rancherPubkeyStr);
-    const program = this.solanaService.getProgram();
+  dto: RegisterRanchDto,
+  rancherPubkeyStr: string,
+): Promise<{ transaction: string; ranchPda: string; latestBlockhash: any }> {
+  const rancherPubkey = new PublicKey(rancherPubkeyStr);
+  const program = this.solanaService.getProgram();
 
-    const [ranchPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from('ranch'), rancherPubkey.toBuffer()],
-      program.programId,
-    );
+  const [ranchPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from('ranch'), rancherPubkey.toBuffer()],
+    program.programId,
+  );
+  const ranchPdaString = ranchPda.toBase58();
 
-    const instruction = await program.methods
-      .registerRanch(dto.name, { [dto.country]: {} })
-      .accounts({
-        authority: rancherPubkey,
-        ranchProfile: ranchPda,
-      } as any)
-      .instruction();
+  const instruction = await program.methods
+    .registerRanch(dto.name, { [dto.country]: {} })
+    .accounts({
+      authority: rancherPubkey,
+      ranchProfile: ranchPda,
+    } as any)
+    .instruction();
 
-    const latestBlockhash =
-      await this.solanaService.connection.getLatestBlockhash();
+  const latestBlockhash = await this.solanaService.connection.getLatestBlockhash();
 
-    const tx = new Transaction({
-      feePayer: rancherPubkey,
+  const tx = new Transaction({
+    feePayer: rancherPubkey,
+    blockhash: latestBlockhash.blockhash,
+    lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+  });
+  tx.add(instruction);
+
+  const serializedTx = tx.serialize({ requireAllSignatures: false });
+
+  return {
+    transaction: serializedTx.toString('base64'),
+    ranchPda: ranchPdaString,
+    latestBlockhash: {
       blockhash: latestBlockhash.blockhash,
       lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
-    });
-    tx.add(instruction);
+    },
+  };
+}
 
-    const serializedTx = tx.serialize({
-      requireAllSignatures: false,
-    });
-
-    return {
-      transaction: serializedTx.toString('base64'),
-      latestBlockhash: {
-        blockhash: latestBlockhash.blockhash,
-        lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
-      },
-    };
-  }
 
   async confirmRegistration(
     dto: ConfirmRanchDto,
@@ -170,6 +169,79 @@ export class RanchService {
     }
 
     return newRanch;
+  }
+
+  async setRanchVerification(
+    pdaToUpdate: string,
+    isVerified: boolean,
+  ): Promise<Ranch> {
+    const program = this.solanaService.getProgram();
+    const ranchPda = new PublicKey(pdaToUpdate);
+
+    this.logger.log(
+      `Admin (SuperAuthority) setting ranch verification to ${isVerified}: ${pdaToUpdate}`,
+    );
+
+    // 1. Verificar que el ranch existe en DB
+    const ranchInDb = await this.ranchRepository.findOne({
+      where: { pda: pdaToUpdate },
+      relations: ['user'],
+    });
+
+    if (!ranchInDb) {
+      throw new NotFoundException('Ranch not found in database.');
+    }
+
+    // 2. Validar que no se esté intentando establecer el mismo estado
+    if (ranchInDb.isVerified === isVerified) {
+      throw new BadRequestException(
+        `Ranch is already ${isVerified ? 'verified' : 'unverified'}.`,
+      );
+    }
+
+    // 3. Ejecutar instrucción on-chain
+    try {
+      const txid = await program.methods
+        .setRanchVerification(isVerified)
+        .accounts({
+          ranchProfile: ranchPda,
+          superAuthority: this.adminKeypair.publicKey,
+        } as any)
+        .signers([this.adminKeypair])
+        .rpc({ commitment: 'confirmed' });
+
+      this.logger.log(`Confirmed 'set_ranch_verification' TX: ${txid}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to set ranch verification ${pdaToUpdate}: ${error.message}`,
+        error.stack,
+      );
+      throw new InternalServerErrorException(
+        `On-chain verification update failed: ${error.message}`,
+      );
+    }
+
+    // 4. Fetch updated data from blockchain
+    let onChainData;
+    try {
+      onChainData = await program.account.ranchProfile.fetch(ranchPda);
+    } catch (e) {
+      this.logger.error(
+        `Failed to fetch ranch PDA ${pdaToUpdate} after verification update`,
+        e.stack,
+      );
+      throw new NotFoundException('Ranch not found on-chain after update.');
+    }
+
+    // 5. Update database
+    ranchInDb.isVerified = onChainData.isVerified;
+    await this.ranchRepository.save(ranchInDb);
+
+    this.logger.log(
+      `Ranch ${ranchInDb.name} updated to 'isVerified: ${onChainData.isVerified}' in DB`,
+    );
+
+    return ranchInDb;
   }
 
   async verifyRanch(pdaToVerify: string): Promise<Ranch> {
@@ -268,4 +340,43 @@ export class RanchService {
     }
     return ranch;
   }
+
+  // private async getOrCreateRanchPDA(
+  //   solanaService: SolanaService,
+  //   ownerPublicKey: PublicKey,
+  //   name: string,
+  //   country: string
+  // ) {
+  //   const program = solanaService.getProgram();
+
+  //   const [ranchPDA, bump] = PublicKey.findProgramAddressSync(
+  //     [Buffer.from('ranch'), ownerPublicKey.toBuffer()],
+  //     program.programId
+  //   );
+
+  //   try {
+  //     const ranchAccount = await program.account.ranchProfile.fetch(ranchPDA);
+  //     console.log('Ranch ya existe:', ranchPDA.toBase58());
+  //     return ranchAccount;
+  //   } catch (err: any) {
+  //     if (err.message.includes('AccountNotFound')) {
+  //       console.log('Ranch no existe, creando...');
+
+  //       const tx = await program.methods
+  //         .registerRanch(name, country) 
+  //         .accounts({
+  //           ranchProfile: ranchPDA,
+  //           authority: ownerPublicKey,
+  //           systemProgram: SystemProgram.programId,
+  //         } as any)
+  //         .rpc();
+
+  //       console.log('Transacción enviada:', tx);
+
+  //       return await program.account.ranchProfile.fetch(ranchPDA);
+  //     } else {
+  //       throw err;
+  //     }
+  //   }
+  // }
 }

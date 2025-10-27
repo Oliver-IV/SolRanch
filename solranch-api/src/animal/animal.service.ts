@@ -4,8 +4,7 @@ import {
     NotFoundException,
     BadRequestException,
     InternalServerErrorException,
-    ConflictException,
-    ForbiddenException, 
+    ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -13,21 +12,23 @@ import { SolanaService } from '../solana/solana.service';
 import { Ranch } from '../ranch/entities/ranch.entity';
 import { Verifier } from '../verifier/entities/verifier.entity';
 import { Animal } from './entities/animal.entity';
-import {
-    PendingTransaction,
-    TxStatus,
-} from './entities/pending-tx.entity';
 import { User } from '../auth/entities/user.entity';
+import { PendingTransaction } from './entities/pending-tx.entity';
 import { CreateAnimalDto } from './dto/create-animal.dto';
-import { AddRancherSignatureDto } from './dto/add-rancher-signature.dto';
 import { ConfirmAnimalDto } from './dto/confirm-animal.dto';
-import { PublicKey, Transaction } from '@solana/web3.js';
-import { Program, BN } from '@coral-xyz/anchor';
-import { SolranchAnchor } from '../solana/idl/solranch_anchor';
-import { SetAnimalPriceDto } from './dto/set-animal-price.dto';
+import { AddRancherSignatureDto } from './dto/add-rancher-signature.dto';
 import { ConfirmTxDto } from './dto/confirm-tx.dto';
+import { SetAnimalPriceDto } from './dto/set-animal-price.dto';
 import { SetAllowedBuyerDto } from './dto/set-allowed-buyer.dto';
 import { FindAnimalsQueryDto } from './dto/find-animals-query.dto';
+import { PublicKey, Transaction, SystemProgram } from '@solana/web3.js';
+import { BN } from '@coral-xyz/anchor';
+
+export enum TxStatus {
+    PENDING_RANCHER_SIGNATURE = 'PENDING_RANCHER_SIGNATURE',
+    PENDING_VERIFIER_SIGNATURE = 'PENDING_VERIFIER_SIGNATURE',
+    CONFIRMED = 'CONFIRMED',
+}
 
 @Injectable()
 export class AnimalService {
@@ -41,15 +42,15 @@ export class AnimalService {
         private readonly verifierRepository: Repository<Verifier>,
         @InjectRepository(Animal)
         private readonly animalRepository: Repository<Animal>,
-        @InjectRepository(PendingTransaction)
-        private readonly pendingTxRepository: Repository<PendingTransaction>,
         @InjectRepository(User)
         private readonly userRepository: Repository<User>,
+        @InjectRepository(PendingTransaction)
+        private readonly pendingTxRepository: Repository<PendingTransaction>,
     ) {
         this.logger.log('AnimalService initialized');
     }
 
-    async buildTx(
+    async buildRegisterAnimalTx(
         dto: CreateAnimalDto,
         rancherPubkeyStr: string,
     ): Promise<{ transaction: string; animalPda: string; blockhash: any }> {
@@ -73,50 +74,39 @@ export class AnimalService {
             .andWhere('verifier.isActive = :isActive', { isActive: true })
             .getOne();
 
-        if (!verifierProfile) {
+        if (!verifierProfile || !verifierProfile.user) {
             throw new NotFoundException(`Active verifier with PDA ${dto.verifier_pda} not found.`);
         }
 
-        if (!verifierProfile.user) {
-            throw new InternalServerErrorException(`Verifier profile ${dto.verifier_pda} has no associated user.`);
+        const verifierProfilePda = new PublicKey(verifierProfile.pda);
+        const ranchPda = new PublicKey(ranch.pda);
+
+        let onChainAnimalCount: BN;
+        try {
+            const onChainRanchProfile = await program.account.ranchProfile.fetch(ranchPda);
+            onChainAnimalCount = onChainRanchProfile.animalCount; // Este es el valor real
+        } catch (e) {
+            this.logger.error(`Failed to fetch on-chain ranch profile ${ranchPda.toBase58()}`, e);
+            throw new InternalServerErrorException('Failed to fetch on-chain ranch data.');
         }
 
-        const verifierAuthorityPubkey = new PublicKey(verifierProfile.user.pubkey);
-        const verifierProfilePda = new PublicKey(verifierProfile.pda);
-
-        const ranchPda = new PublicKey(ranch.pda);
-        const animalCountBuffer = new BN(ranch.animalCount).toArrayLike(Buffer, 'le', 8);
+        const animalCountBuffer = new BN(onChainAnimalCount).toArrayLike(Buffer, 'le', 8);
 
         const [animalPda] = PublicKey.findProgramAddressSync(
-            [
-                Buffer.from('ranch_animal'),
-                ranchPda.toBuffer(),
-                animalCountBuffer,
-            ],
+            [Buffer.from('ranch_animal'), ranchPda.toBuffer(), animalCountBuffer],
             program.programId,
         );
 
-        const existingPending = await this.pendingTxRepository.findOne({
-            where: { animalPda: animalPda.toBase58() }
-        });
-        if (existingPending) {
-            this.logger.warn(`Build request for existing pending animal ${animalPda.toBase58()}. Returning existing TX.`);
-            throw new ConflictException(`A registration process for animal PDA ${animalPda.toBase58()} is already pending.`);
-        }
+        this.logger.log(`Building register_animal TX for animal ${animalPda.toBase58()}`);
 
         const instruction = await program.methods
-            .registerAnimal(
-                dto.id_chip,
-                dto.specie,
-                dto.breed,
-                new BN(dto.birth_date),
-            )
+            .registerAnimal(dto.id_chip, dto.specie, dto.breed, new BN(dto.birth_date))
             .accounts({
                 animal: animalPda,
                 verifierProfile: verifierProfilePda,
                 ranchProfile: ranchPda,
                 authority: rancherPubkey,
-                verifier: verifierAuthorityPubkey,
+                systemProgram: SystemProgram.programId,
             } as any)
             .instruction();
 
@@ -128,249 +118,113 @@ export class AnimalService {
         });
         tx.add(instruction);
 
-        const serializedTx = tx.serialize({
-            requireAllSignatures: false,
-        });
-        const base64Tx = serializedTx.toString('base64');
-
-        const pending = this.pendingTxRepository.create({
-            serializedTx: base64Tx,
-            rancherPubkey: rancherPubkeyStr,
-            verifierPubkey: verifierProfile.user.pubkey,
-            animalPda: animalPda.toBase58(),
-            status: TxStatus.PENDING_RANCHER_SIGNATURE,
-        });
-        await this.pendingTxRepository.save(pending);
-
-        this.logger.log(`Built TX for animal ${animalPda.toBase58()}, awaiting rancher signature.`);
         return {
-            transaction: base64Tx,
+            transaction: tx.serialize({ requireAllSignatures: false }).toString('base64'),
             animalPda: animalPda.toBase58(),
-            blockhash: {
-                blockhash: latestBlockhash.blockhash,
-                lastValidBlockHeight: latestBlockhash.lastValidBlockHeight
-            }
+            blockhash: latestBlockhash,
         };
     }
 
-    async addRancherSignature(
-        dto: AddRancherSignatureDto,
+
+    async confirmRegisterAnimal(
+        dto: ConfirmTxDto,
         rancherPubkeyStr: string,
-    ): Promise<{ status: string }> {
-        const pendingTx = await this.pendingTxRepository.findOne({
-            where: { animalPda: dto.animal_pda, rancherPubkey: rancherPubkeyStr },
-        });
-
-        if (!pendingTx) {
-            throw new NotFoundException(`Pending transaction for animal ${dto.animal_pda} not found.`);
-        }
-        if (pendingTx.status !== TxStatus.PENDING_RANCHER_SIGNATURE) {
-            throw new BadRequestException(`Transaction status is ${pendingTx.status}, not awaiting rancher signature.`);
-        }
-
-        try {
-            const tx = Transaction.from(Buffer.from(dto.signed_tx, 'base64'));
-            if (!tx.signatures.some(sig => sig.signature !== null)) {
-                throw new Error('Transaction has no signatures.');
-            }
-        } catch (e) {
-            this.logger.warn(`Invalid signed transaction received for ${dto.animal_pda}: ${e.message}`);
-            throw new BadRequestException(`Invalid transaction format or signature.`);
-        }
-
-        pendingTx.serializedTx = dto.signed_tx;
-        pendingTx.status = TxStatus.PENDING_VERIFIER_SIGNATURE;
-        await this.pendingTxRepository.save(pendingTx);
-
-        this.logger.log(`Rancher signature added for ${dto.animal_pda}. Awaiting verifier.`);
-        return { status: TxStatus.PENDING_VERIFIER_SIGNATURE };
-    }
-
-    async getPendingForVerifier(
-        verifierPubkeyStr: string,
-    ): Promise<PendingTransaction[]> {
-        this.logger.log(`Fetching pending transactions for verifier ${verifierPubkeyStr}`);
-        return this.pendingTxRepository.find({
-            where: {
-                verifierPubkey: verifierPubkeyStr,
-                status: TxStatus.PENDING_VERIFIER_SIGNATURE,
-            },
-            order: { createdAt: 'DESC' }
-        });
-    }
-
-    async getTxForVerifier(
-        animalPdaStr: string,
-        verifierPubkeyStr: string,
-    ): Promise<{ transaction: string; blockhash: any }> {
-        const pendingTx = await this.pendingTxRepository.findOne({
-            where: {
-                animalPda: animalPdaStr,
-                verifierPubkey: verifierPubkeyStr,
-                status: TxStatus.PENDING_VERIFIER_SIGNATURE,
-            },
-        });
-        if (!pendingTx) {
-            throw new NotFoundException(`Pending transaction for animal ${animalPdaStr} not found or not awaiting your signature.`);
-        }
-
-        const latestBlockhash = await this.solanaService.connection.getLatestBlockhash();
-
-        this.logger.log(`Providing TX for animal ${animalPdaStr} to verifier ${verifierPubkeyStr}`);
-        return {
-            transaction: pendingTx.serializedTx,
-            blockhash: {
-                blockhash: latestBlockhash.blockhash,
-                lastValidBlockHeight: latestBlockhash.lastValidBlockHeight
-            }
-        };
-    }
-
-    async confirmRegistration(
-        dto: ConfirmAnimalDto,
-        verifierPubkeyStr: string,
     ): Promise<Animal> {
-        this.logger.log(`Verifier ${verifierPubkeyStr} confirming registration for animal ${dto.animal_pda} with TX ${dto.txid}`);
+        this.logger.log(`Rancher ${rancherPubkeyStr} confirming registration for animal ${dto.animal_pda} with TX ${dto.txid}`);
 
         const program = this.solanaService.getProgram();
 
-        const pendingTx = await this.pendingTxRepository.findOne({
-            where: {
-                animalPda: dto.animal_pda,
-                verifierPubkey: verifierPubkeyStr,
-                status: TxStatus.PENDING_VERIFIER_SIGNATURE,
-            },
-        });
-        if (!pendingTx) {
-            this.logger.warn(`Confirm request received for unknown or already processed pending TX for animal ${dto.animal_pda}`);
-            const existingAnimal = await this.animalRepository.findOne({ where: { pda: dto.animal_pda } });
-            if (existingAnimal) {
-                throw new ConflictException(`Animal ${dto.animal_pda} has already been registered.`);
-            }
-            throw new NotFoundException(`Pending transaction for animal ${dto.animal_pda} not found or not awaiting your confirmation.`);
-        }
-
-        let confirmation;
-        try {
-            confirmation = await this.solanaService.connection.confirmTransaction(
-                {
-                    signature: dto.txid,
-                    blockhash: dto.latestBlockhash.blockhash,
-                    lastValidBlockHeight: dto.latestBlockhash.lastValidBlockHeight,
-                },
-                'confirmed',
-            );
-        } catch (error) {
-            this.logger.error(`Error confirming TX ${dto.txid} on-chain: ${error.message}`, error.stack);
-            throw new InternalServerErrorException(`Network or RPC error during transaction confirmation: ${error.message}`);
-        }
-
+        const confirmation = await this.solanaService.connection.confirmTransaction(
+            { signature: dto.txid, ...dto.latestBlockhash },
+            'finalized',
+        );
 
         if (confirmation.value.err) {
-            pendingTx.status = TxStatus.FAILED;
-            pendingTx.errorMessage = confirmation.value.err.toString();
-            pendingTx.finalTxSignature = dto.txid;
-            await this.pendingTxRepository.save(pendingTx);
-            this.logger.error(`Transaction ${dto.txid} for animal ${dto.animal_pda} failed on-chain: ${confirmation.value.err}`);
-            throw new BadRequestException(`Transaction failed to confirm on-chain: ${confirmation.value.err}`);
+            this.logger.error('Transaction confirmation failed', confirmation.value.err);
+            throw new BadRequestException(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
         }
 
         const animalPda = new PublicKey(dto.animal_pda);
         let onChainData;
         try {
             onChainData = await program.account.animal.fetch(animalPda);
-            this.logger.log(`Fetched on-chain data for animal ${dto.animal_pda}`);
         } catch (e) {
-            this.logger.error(`CRITICAL: Failed to fetch animal account ${dto.animal_pda} after TX ${dto.txid} confirmation: ${e.message}`, e.stack);
-            pendingTx.status = TxStatus.FAILED;
-            pendingTx.errorMessage = `Fetch failed after confirmation: ${e.message}`;
-            pendingTx.finalTxSignature = dto.txid;
-            await this.pendingTxRepository.save(pendingTx);
-            throw new InternalServerErrorException(`Failed to fetch animal account data after successful confirmation.`);
+            this.logger.error('Failed to fetch on-chain animal after confirm', e);
+            throw new InternalServerErrorException('Failed to fetch on-chain animal data after confirmation.');
         }
 
-        const owner = await this.userRepository.findOne({
-            where: { pubkey: onChainData.owner.toBase58() },
-        });
-        const originRanch = await this.ranchRepository.findOne({
-            where: { pda: onChainData.originRanch.toBase58() },
-        });
-        if (!owner) {
-            this.logger.error(`Owner user ${onChainData.owner.toBase58()} not found in DB for animal ${dto.animal_pda}`);
-            throw new InternalServerErrorException('Owner user record not found in database.');
-        }
-        if (!originRanch) {
-            this.logger.error(`Origin ranch ${onChainData.originRanch.toBase58()} not found in DB for animal ${dto.animal_pda}`);
-            throw new InternalServerErrorException('Origin ranch record not found in database.');
+        const owner = await this.userRepository.findOne({ where: { pubkey: onChainData.owner.toBase58() } });
+        const originRanch = await this.ranchRepository.findOne({ where: { pda: onChainData.originRanch.toBase58() } });
+
+        if (!owner || !originRanch) {
+            this.logger.error('Owner or ranch not found in DB after on-chain confirm', { owner: !!owner, originRanch: !!originRanch });
+            throw new InternalServerErrorException('Owner or ranch not found in database.');
         }
 
         const newAnimal = this.animalRepository.create({
-            pda: animalPda.toBase58(),
-            owner: owner,
-            originRanch: originRanch,
+            pda: dto.animal_pda,
+            owner,
+            originRanch,
             idChip: onChainData.idChip,
             specie: onChainData.specie,
             breed: onChainData.breed,
             birthDate: new Date(onChainData.birthDate.toNumber() * 1000),
+            isVerified: onChainData.isVerified,
+            assignedVerifierPubkey: onChainData.assignedVerifier.toBase58(),
             salePrice: onChainData.salePrice?.toString() ?? null,
             lastSalePrice: onChainData.lastSalePrice.toString(),
             allowedBuyerPubkey: onChainData.allowedBuyer?.toBase58() ?? null,
         });
-        try {
-            await this.animalRepository.save(newAnimal);
-            this.logger.log(`Animal ${animalPda.toBase58()} saved to database.`);
-        } catch (dbError) {
-            this.logger.error(`Failed to save animal ${animalPda.toBase58()} to DB: ${dbError.message}`, dbError.stack);
-            throw new InternalServerErrorException('Failed to save animal data to database after confirmation.');
-        }
 
-        const newAnimalCount = onChainData.id.toNumber() + 1;
-        if (originRanch.animalCount !== newAnimalCount) {
-            this.logger.log(`Updating ranch ${originRanch.pda} animal count from ${originRanch.animalCount} to ${newAnimalCount}`);
-            originRanch.animalCount = newAnimalCount;
-            await this.ranchRepository.save(originRanch);
-        }
+        await this.animalRepository.save(newAnimal);
 
-        await this.pendingTxRepository.remove(pendingTx);
-        this.logger.log(`Pending transaction for animal ${dto.animal_pda} removed.`);
+        originRanch.animalCount = Number(originRanch.animalCount || 0) + 1;
+        await this.ranchRepository.save(originRanch);
+
+        this.logger.log(`Animal ${dto.animal_pda} saved in DB and ranch count updated`);
 
         return newAnimal;
     }
 
-    async buildSetPriceTx(
+    async buildApproveAnimalTx(
         animalPdaStr: string,
-        dto: SetAnimalPriceDto,
-        ownerPubkeyStr: string,
+        verifierPubkeyStr: string,
     ): Promise<{ transaction: string; blockhash: any }> {
-        this.logger.log(`Building 'set_animal_price' tx for ${animalPdaStr} by owner ${ownerPubkeyStr}`);
-        const ownerPubkey = new PublicKey(ownerPubkeyStr);
-        const animalPda = new PublicKey(animalPdaStr);
-        const program = this.solanaService.getProgram();
+        this.logger.log(`Building approve_animal TX for ${animalPdaStr} by verifier ${verifierPubkeyStr}`);
 
-        let animalAccount;
-        try {
-            animalAccount = await program.account.animal.fetch(animalPda);
-        } catch (e) {
-            this.logger.error(`Animal ${animalPdaStr} not found on-chain.`);
-            throw new NotFoundException(`Animal ${animalPdaStr} not found on-chain.`);
+        const program = this.solanaService.getProgram();
+        const animalPda = new PublicKey(animalPdaStr);
+        const verifierPubkey = new PublicKey(verifierPubkeyStr);
+
+        const animalInDb = await this.animalRepository.findOne({
+            where: { pda: animalPdaStr },
+            relations: ['owner', 'originRanch'],
+        });
+
+        if (!animalInDb) {
+            throw new NotFoundException(`Animal ${animalPdaStr} not found in database.`);
         }
 
-        if (animalAccount.owner.toBase58() !== ownerPubkeyStr) {
-            throw new ForbiddenException('Only the owner can set the animal price.');
+        if (animalInDb.assignedVerifierPubkey !== verifierPubkeyStr) {
+            throw new ForbiddenException('You are not the assigned verifier for this animal.');
+        }
+
+        if (animalInDb.isVerified) {
+            throw new BadRequestException('Animal is already verified.');
         }
 
         const instruction = await program.methods
-            .setAnimalPrice(new BN(dto.price))
+            .approveAnimal()
             .accounts({
                 animal: animalPda,
-                owner: ownerPubkey,
-                originRanch: animalAccount.originRanch,
-            } as any)
+                assignedVerifier: verifierPubkey,
+                systemProgram: SystemProgram.programId,
+            })
             .instruction();
 
         const latestBlockhash = await this.solanaService.connection.getLatestBlockhash();
         const tx = new Transaction({
-            feePayer: ownerPubkey, 
+            feePayer: verifierPubkey,
             blockhash: latestBlockhash.blockhash,
             lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
         });
@@ -387,44 +241,286 @@ export class AnimalService {
         };
     }
 
+
+    async confirmApproveAnimal(
+        animalPdaStr: string,
+        dto: ConfirmTxDto,
+        verifierPubkeyStr: string,
+    ): Promise<Animal> {
+        this.logger.log(`Verifier ${verifierPubkeyStr} confirming approval for animal ${animalPdaStr} with TX ${dto.txid}`);
+
+        const program = this.solanaService.getProgram();
+
+        const confirmation = await this.solanaService.connection.confirmTransaction(
+            { signature: dto.txid, ...dto.latestBlockhash },
+            'finalized',
+        );
+
+        if (confirmation.value.err) {
+            this.logger.error('Approve tx failed', confirmation.value.err);
+            throw new BadRequestException(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+        }
+
+        const animalPda = new PublicKey(animalPdaStr);
+        let onChainData;
+        try {
+            onChainData = await program.account.animal.fetch(animalPda);
+        } catch (e) {
+            this.logger.error('Failed to fetch animal after approval', e);
+            throw new InternalServerErrorException('Failed to fetch updated animal data.');
+        }
+
+        const animalInDb = await this.animalRepository.findOne({
+            where: { pda: animalPdaStr },
+            relations: ['owner', 'originRanch'],
+        });
+
+        if (!animalInDb) {
+            throw new NotFoundException(`Animal ${animalPdaStr} not found in database.`);
+        }
+
+        animalInDb.isVerified = onChainData.isVerified;
+        await this.animalRepository.save(animalInDb);
+
+        try {
+            await this.pendingTxRepository.delete({ animalPda: animalPdaStr });
+        } catch (e) {
+            this.logger.warn('Failed to delete pending tx on approve', e);
+        }
+
+        this.logger.log(`Animal ${animalPdaStr} approved and updated in database`);
+
+        return animalInDb;
+    }
+
+    async buildCancelAnimalTx(
+        animalPdaStr: string,
+        signerPubkeyStr: string,
+    ): Promise<{ transaction: string; blockhash: any }> {
+        this.logger.log(`Building cancel_animal_registration TX for ${animalPdaStr} by ${signerPubkeyStr}`);
+
+        const program = this.solanaService.getProgram();
+        const animalPda = new PublicKey(animalPdaStr);
+        const signerPubkey = new PublicKey(signerPubkeyStr);
+
+        const animalInDb = await this.animalRepository.findOne({
+            where: { pda: animalPdaStr },
+            relations: ['owner', 'originRanch'],
+        });
+
+        if (!animalInDb) {
+            throw new NotFoundException(`Animal ${animalPdaStr} not found in database.`);
+        }
+
+        if (animalInDb.isVerified) {
+            throw new BadRequestException('Cannot cancel a verified animal.');
+        }
+
+        if (animalInDb.salePrice) {
+            throw new BadRequestException('Cannot cancel a registration for an animal that is listed for sale.');
+        }
+
+        if (
+            animalInDb.owner.pubkey !== signerPubkeyStr &&
+            animalInDb.assignedVerifierPubkey !== signerPubkeyStr
+        ) {
+            throw new ForbiddenException('Only the owner or assigned verifier can cancel.');
+        }
+
+        const ranchPda = new PublicKey(animalInDb.originRanch.pda);
+
+        const instruction = await program.methods
+            .cancelAnimalRegistration()
+            .accounts({
+                animal: animalPda,
+                ranchProfile: ranchPda,
+                signer: signerPubkey,
+                authority: new PublicKey(animalInDb.owner.pubkey),
+                receiver: signerPubkey,
+                systemProgram: SystemProgram.programId,
+            } as any)
+            .instruction();
+
+        const latestBlockhash = await this.solanaService.connection.getLatestBlockhash();
+        const tx = new Transaction({
+            feePayer: signerPubkey,
+            blockhash: latestBlockhash.blockhash,
+            lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+        });
+        tx.add(instruction);
+
+        return {
+            transaction: tx.serialize({ requireAllSignatures: false }).toString('base64'),
+            blockhash: {
+                blockhash: latestBlockhash.blockhash,
+                lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+            },
+        };
+    }
+
+
+    async confirmCancelAnimal(
+        animalPdaStr: string,
+        dto: ConfirmTxDto,
+        signerPubkeyStr: string,
+    ): Promise<{ message: string }> {
+        this.logger.log(`Confirming cancel/reject for animal ${animalPdaStr} by ${signerPubkeyStr}`);
+
+        const program = this.solanaService.getProgram();
+
+        const confirmation = await this.solanaService.connection.confirmTransaction(
+            { signature: dto.txid, ...dto.latestBlockhash },
+            'finalized',
+        );
+
+        if (confirmation.value.err) {
+            this.logger.error('Cancel/Reject transaction failed', confirmation.value.err);
+            throw new BadRequestException(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+        }
+
+        try {
+            await program.account.animal.fetch(new PublicKey(animalPdaStr));
+            this.logger.error(`Animal account ${animalPdaStr} still exists after cancel/reject tx.`);
+            throw new InternalServerErrorException('Animal account was not closed on-chain.');
+        } catch (e) {
+            const msg = e?.message || '';
+            if (
+                msg.includes('Account does not exist') ||
+                msg.includes('Could not find account') ||
+                msg.includes('accounts not found')
+            ) {
+                this.logger.log(`Animal account ${animalPdaStr} successfully closed on-chain.`);
+            } else {
+                this.logger.error('Error verifying account closure', e);
+                throw new InternalServerErrorException('Failed to verify account closure.');
+            }
+        }
+
+        const animalInDb = await this.animalRepository.findOne({
+            where: { pda: animalPdaStr },
+            relations: ['originRanch'],
+        });
+
+        if (animalInDb) {
+            const ranch = animalInDb.originRanch;
+
+            await this.animalRepository.remove(animalInDb);
+            this.logger.log(`Animal ${animalPdaStr} removed from DB.`);
+
+            if (ranch) {
+                ranch.animalCount = Math.max(0, Number(ranch.animalCount || 0) - 1);
+                await this.ranchRepository.save(ranch);
+                this.logger.log(`Ranch ${ranch.pda} animalCount decremented.`);
+            }
+        } else {
+            this.logger.warn(`Animal ${animalPdaStr} not found in DB. Possibly already removed.`);
+        }
+
+        try {
+            await this.pendingTxRepository.delete({ animalPda: animalPdaStr });
+            this.logger.log(`Pending transactions for animal ${animalPdaStr} cleared.`);
+        } catch (e) {
+            this.logger.warn('Failed to delete pending tx for animal after cancel/reject', e);
+        }
+
+        return { message: 'Animal registration cancelled/rejected successfully.' };
+    }
+
+    async buildRejectAnimalTx(animalPdaStr: string, verifierPubkeyStr: string) {
+        return this.buildCancelAnimalTx(animalPdaStr, verifierPubkeyStr);
+    }
+
+    async confirmRejectAnimal(
+        animalPdaStr: string,
+        dto: ConfirmTxDto,
+        verifierPubkeyStr: string,
+    ) {
+        return this.confirmCancelAnimal(animalPdaStr, dto, verifierPubkeyStr);
+    }
+
+    async buildSetPriceTx(
+        animalPdaStr: string,
+        dto: SetAnimalPriceDto,
+        ownerPubkeyStr: string,
+    ): Promise<{ transaction: string; blockhash: any }> {
+        this.logger.log(`Building set_animal_price tx for ${animalPdaStr}`);
+
+        const ownerPubkey = new PublicKey(ownerPubkeyStr);
+        const animalPda = new PublicKey(animalPdaStr);
+        const program = this.solanaService.getProgram();
+
+        let animalAccount;
+        try {
+            animalAccount = await program.account.animal.fetch(animalPda);
+        } catch (e) {
+            throw new NotFoundException(`Animal ${animalPdaStr} not found on-chain.`);
+        }
+
+        if (animalAccount.owner.toBase58() !== ownerPubkeyStr) {
+            throw new ForbiddenException('Only the owner can set the price.');
+        }
+
+        if (!animalAccount.isVerified) {
+            throw new BadRequestException('Cannot set price for an unverified animal.');
+        }
+
+        const instruction = await program.methods
+            .setAnimalPrice(new BN(dto.price))
+            .accounts({
+                animal: animalPda,
+                owner: ownerPubkey,
+                originRanch: animalAccount.originRanch,
+                systemProgram: SystemProgram.programId,
+            } as any)
+            .instruction();
+
+        const latestBlockhash = await this.solanaService.connection.getLatestBlockhash();
+        const tx = new Transaction({
+            feePayer: ownerPubkey,
+            blockhash: latestBlockhash.blockhash,
+            lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+        });
+        tx.add(instruction);
+
+        return {
+            transaction: tx.serialize({ requireAllSignatures: false }).toString('base64'),
+            blockhash: {
+                blockhash: latestBlockhash.blockhash,
+                lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+            },
+        };
+    }
+
+
     async confirmSetPrice(
         animalPdaStr: string,
         dto: ConfirmTxDto,
         ownerPubkeyStr: string,
     ): Promise<Animal> {
-        this.logger.log(`Confirming 'set_animal_price' for ${animalPdaStr} with TX ${dto.txid}`);
-        const animalPda = new PublicKey(animalPdaStr);
         const program = this.solanaService.getProgram();
-
         const confirmation = await this.solanaService.connection.confirmTransaction(
-            { signature: dto.txid, ...dto.latestBlockhash }, 'confirmed'
+            { signature: dto.txid, ...dto.latestBlockhash },
+            'finalized',
         );
+
         if (confirmation.value.err) {
-            this.logger.warn(`'set_animal_price' TX ${dto.txid} failed: ${confirmation.value.err}`);
-            throw new BadRequestException(`Transaction failed: ${confirmation.value.err}`);
+            throw new BadRequestException(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
         }
 
-        let onChainData;
-        try {
-            onChainData = await program.account.animal.fetch(animalPda);
-        } catch (e) {
-            this.logger.error(`Failed to fetch animal ${animalPdaStr} after confirmSetPrice: ${e.message}`, e.stack);
-            throw new InternalServerErrorException('Failed to fetch updated animal data.');
-        }
+        const animalPda = new PublicKey(animalPdaStr);
+        const onChainData = await program.account.animal.fetch(animalPda);
 
-        const animalInDb = await this.animalRepository.findOne({ where: { pda: animalPdaStr }, relations: ['owner'] });
+        const animalInDb = await this.animalRepository.findOne({
+            where: { pda: animalPdaStr },
+            relations: ['owner'],
+        });
+
         if (!animalInDb) {
-            this.logger.error(`Animal ${animalPdaStr} not found in DB after confirmSetPrice.`);
-            throw new NotFoundException(`Animal ${animalPdaStr} not found in DB.`);
-        }
-
-        if (animalInDb.owner.pubkey !== ownerPubkeyStr) {
-            this.logger.warn(`confirmSetPrice called by ${ownerPubkeyStr} but DB owner is ${animalInDb.owner.pubkey}`);
+            throw new NotFoundException(`Animal not found in database.`);
         }
 
         animalInDb.salePrice = onChainData.salePrice?.toString() ?? null;
         await this.animalRepository.save(animalInDb);
-        this.logger.log(`Animal ${animalPdaStr} price updated in DB to ${animalInDb.salePrice}`);
 
         return animalInDb;
     }
@@ -434,16 +530,12 @@ export class AnimalService {
         dto: SetAllowedBuyerDto,
         ownerPubkeyStr: string,
     ): Promise<{ transaction: string; blockhash: any }> {
-        this.logger.log(`Building 'set_allowed_animal_buyer' tx for ${animalPdaStr} by owner ${ownerPubkeyStr}`);
         const ownerPubkey = new PublicKey(ownerPubkeyStr);
         const animalPda = new PublicKey(animalPdaStr);
         const allowedBuyer = new PublicKey(dto.allowedBuyerPubkey);
         const program = this.solanaService.getProgram();
 
-        let animalAccount;
-        try {
-            animalAccount = await program.account.animal.fetch(animalPda);
-        } catch (e) { throw new NotFoundException(`Animal ${animalPdaStr} not found on-chain.`); }
+        const animalAccount = await program.account.animal.fetch(animalPda);
 
         if (animalAccount.owner.toBase58() !== ownerPubkeyStr) {
             throw new ForbiddenException('Only the owner can set the allowed buyer.');
@@ -455,19 +547,20 @@ export class AnimalService {
                 animal: animalPda,
                 owner: ownerPubkey,
                 originRanch: animalAccount.originRanch,
+                systemProgram: SystemProgram.programId,
             } as any)
             .instruction();
 
         const latestBlockhash = await this.solanaService.connection.getLatestBlockhash();
-        const tx = new Transaction();
-        tx.feePayer = ownerPubkey;
-        tx.recentBlockhash = latestBlockhash.blockhash;
-        tx.lastValidBlockHeight = latestBlockhash.lastValidBlockHeight;
+        const tx = new Transaction({
+            feePayer: ownerPubkey,
+            blockhash: latestBlockhash.blockhash,
+            lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+        });
         tx.add(instruction);
-        const serializedTx = tx.serialize({ requireAllSignatures: false });
 
         return {
-            transaction: serializedTx.toString('base64'),
+            transaction: tx.serialize({ requireAllSignatures: false }).toString('base64'),
             blockhash: {
                 blockhash: latestBlockhash.blockhash,
                 lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
@@ -480,69 +573,76 @@ export class AnimalService {
         dto: ConfirmTxDto,
         ownerPubkeyStr: string,
     ): Promise<Animal> {
-        this.logger.log(`Confirming 'set_allowed_buyer' for ${animalPdaStr} with TX ${dto.txid}`);
-        const animalPda = new PublicKey(animalPdaStr);
         const program = this.solanaService.getProgram();
-
         const confirmation = await this.solanaService.connection.confirmTransaction(
-            { signature: dto.txid, ...dto.latestBlockhash }, 'confirmed'
+            { signature: dto.txid, ...dto.latestBlockhash },
+            'finalized',
         );
-        if (confirmation.value.err) { throw new BadRequestException(`TX failed: ${confirmation.value.err}`); }
 
-        let onChainData;
-        try {
-            onChainData = await program.account.animal.fetch(animalPda);
-        } catch (e) { throw new InternalServerErrorException('Failed to fetch updated data.'); }
+        if (confirmation.value.err) {
+            throw new BadRequestException(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+        }
 
-        const animalInDb = await this.animalRepository.findOne({ where: { pda: animalPdaStr } });
-        if (!animalInDb) { throw new NotFoundException(`Animal ${animalPdaStr} not found in DB.`); }
+        const animalPda = new PublicKey(animalPdaStr);
+        const onChainData = await program.account.animal.fetch(animalPda);
+
+        const animalInDb = await this.animalRepository.findOne({
+            where: { pda: animalPdaStr },
+        });
+
+        if (!animalInDb) {
+            throw new NotFoundException(`Animal not found.`);
+        }
 
         animalInDb.allowedBuyerPubkey = onChainData.allowedBuyer?.toBase58() ?? null;
         await this.animalRepository.save(animalInDb);
-        this.logger.log(`Animal ${animalPdaStr} allowed buyer updated in DB to ${animalInDb.allowedBuyerPubkey}`);
 
         return animalInDb;
     }
+
 
     async buildPurchaseTx(
         animalPdaStr: string,
         buyerPubkeyStr: string,
     ): Promise<{ transaction: string; blockhash: any }> {
-        this.logger.log(`Building 'purchase_animal' tx for ${animalPdaStr} by buyer ${buyerPubkeyStr}`);
         const buyerPubkey = new PublicKey(buyerPubkeyStr);
         const animalPda = new PublicKey(animalPdaStr);
         const program = this.solanaService.getProgram();
 
-        let animalAccount;
-        try {
-            animalAccount = await program.account.animal.fetch(animalPda);
-        } catch (e) { throw new NotFoundException(`Animal ${animalPdaStr} not found on-chain.`); }
+        const animalAccount = await program.account.animal.fetch(animalPda);
 
         if (!animalAccount.salePrice) {
-            throw new BadRequestException(`Animal ${animalPdaStr} is not for sale.`);
+            throw new BadRequestException('Animal is not for sale.');
         }
+
         if (!animalAccount.allowedBuyer || animalAccount.allowedBuyer.toBase58() !== buyerPubkeyStr) {
-            throw new ForbiddenException(`Buyer ${buyerPubkeyStr} is not allowed to purchase this animal.`);
+            throw new ForbiddenException('You are not allowed to purchase this animal.');
         }
+
+        if (animalAccount.owner.toBase58() === buyerPubkeyStr) {
+            throw new BadRequestException('Owner cannot purchase their own animal.');
+        }
+
         const instruction = await program.methods
             .purchaseAnimal()
             .accounts({
                 animal: animalPda,
                 owner: animalAccount.owner,
                 buyer: buyerPubkey,
+                systemProgram: SystemProgram.programId,
             } as any)
             .instruction();
 
         const latestBlockhash = await this.solanaService.connection.getLatestBlockhash();
-        const tx = new Transaction();
-        tx.feePayer = buyerPubkey;
-        tx.recentBlockhash = latestBlockhash.blockhash;
-        tx.lastValidBlockHeight = latestBlockhash.lastValidBlockHeight;
+        const tx = new Transaction({
+            feePayer: buyerPubkey,
+            blockhash: latestBlockhash.blockhash,
+            lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+        });
         tx.add(instruction);
-        const serializedTx = tx.serialize({ requireAllSignatures: false });
 
         return {
-            transaction: serializedTx.toString('base64'),
+            transaction: tx.serialize({ requireAllSignatures: false }).toString('base64'),
             blockhash: {
                 blockhash: latestBlockhash.blockhash,
                 lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
@@ -555,41 +655,43 @@ export class AnimalService {
         dto: ConfirmTxDto,
         buyerPubkeyStr: string,
     ): Promise<Animal> {
-        this.logger.log(`Confirming 'purchase_animal' for ${animalPdaStr} by buyer ${buyerPubkeyStr} with TX ${dto.txid}`);
-        const animalPda = new PublicKey(animalPdaStr);
         const program = this.solanaService.getProgram();
-
         const confirmation = await this.solanaService.connection.confirmTransaction(
-            { signature: dto.txid, ...dto.latestBlockhash }, 'confirmed'
+            { signature: dto.txid, ...dto.latestBlockhash },
+            'finalized',
         );
-        if (confirmation.value.err) { throw new BadRequestException(`TX failed: ${confirmation.value.err}`); }
 
-        let onChainData;
-        try {
-            onChainData = await program.account.animal.fetch(animalPda);
-        } catch (e) { throw new InternalServerErrorException('Failed to fetch updated data after purchase.'); }
+        if (confirmation.value.err) {
+            throw new BadRequestException(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+        }
 
-        const animalInDb = await this.animalRepository.findOne({ where: { pda: animalPdaStr }, relations: ['owner'] });
-        if (!animalInDb) { throw new NotFoundException(`Animal ${animalPdaStr} not found in DB.`); }
+        const animalPda = new PublicKey(animalPdaStr);
+        const onChainData = await program.account.animal.fetch(animalPda);
 
         if (onChainData.owner.toBase58() !== buyerPubkeyStr) {
-            this.logger.error(`CRITICAL: Purchase confirmed (TX ${dto.txid}), but on-chain owner ${onChainData.owner.toBase58()} is not the buyer ${buyerPubkeyStr}!`);
-            throw new InternalServerErrorException('Ownership mismatch after purchase confirmation.');
+            throw new InternalServerErrorException('Ownership mismatch after purchase.');
         }
 
-        const newOwnerUser = await this.userRepository.findOneBy({ pubkey: buyerPubkeyStr });
-        if (!newOwnerUser) {
-            this.logger.error(`New owner user ${buyerPubkeyStr} not found in DB after purchase.`);
-            throw new InternalServerErrorException('New owner user record not found.');
+        const newOwner = await this.userRepository.findOneBy({ pubkey: buyerPubkeyStr });
+        if (!newOwner) {
+            throw new InternalServerErrorException('New owner not found in database.');
         }
 
-        animalInDb.owner = newOwnerUser;
+        const animalInDb = await this.animalRepository.findOne({
+            where: { pda: animalPdaStr },
+            relations: ['owner'],
+        });
+
+        if (!animalInDb) {
+            throw new NotFoundException(`Animal not found.`);
+        }
+
+        animalInDb.owner = newOwner;
         animalInDb.lastSalePrice = onChainData.lastSalePrice.toString();
         animalInDb.salePrice = onChainData.salePrice?.toString() ?? null;
-        animalInDb.allowedBuyerPubkey = onChainData.allowedBuyer?.toBase58() ?? null; 
+        animalInDb.allowedBuyerPubkey = onChainData.allowedBuyer?.toBase58() ?? null;
 
         await this.animalRepository.save(animalInDb);
-        this.logger.log(`Animal ${animalPdaStr} ownership transferred to ${buyerPubkeyStr} in DB.`);
 
         return animalInDb;
     }
@@ -597,70 +699,81 @@ export class AnimalService {
     async findAnimalByPda(pda: string): Promise<Animal> {
         const animal = await this.animalRepository.findOne({
             where: { pda },
-            relations: ['owner', 'originRanch']
+            relations: ['owner', 'originRanch'],
         });
+
         if (!animal) {
             throw new NotFoundException(`Animal with PDA ${pda} not found.`);
         }
+
         return animal;
     }
 
-    async findAllWithFilters(
-    queryDto: FindAnimalsQueryDto,
-  ): Promise<{ data: Animal[]; total: number; page: number; limit: number }> {
-    const {
-      page = 1,
-      limit = 10,
-      specie,
-      breed,
-      ranchPda,
-      isOnSale,
-      minPrice,
-      maxPrice,
-    } = queryDto;
+    async findAllWithFilters(queryDto: FindAnimalsQueryDto): Promise<{
+        data: Animal[];
+        total: number;
+        page: number;
+        limit: number;
+    }> {
+        const { page = 1, limit = 10, specie, breed, ranchPda, country, isOnSale, minPrice, maxPrice } = queryDto;
+        const skip = (page - 1) * limit;
 
-    const skip = (page - 1) * limit;
+        const queryBuilder = this.animalRepository
+            .createQueryBuilder('animal')
+            .leftJoinAndSelect('animal.owner', 'owner')
+            .leftJoinAndSelect('animal.originRanch', 'originRanch');
 
-    const queryBuilder = this.animalRepository.createQueryBuilder('animal')
-      .leftJoinAndSelect('animal.owner', 'owner')
-      .leftJoinAndSelect('animal.originRanch', 'originRanch');
+        if (specie) queryBuilder.andWhere('animal.specie ILIKE :specie', { specie: `%${specie}%` });
+        if (breed) queryBuilder.andWhere('animal.breed ILIKE :breed', { breed: `%${breed}%` });
+        if (ranchPda) queryBuilder.andWhere('originRanch.pda = :ranchPda', { ranchPda });
+        if (country) queryBuilder.andWhere('originRanch.country = :country', { country });
+        if (isOnSale !== undefined) {
+            queryBuilder.andWhere(
+                isOnSale ? 'animal.salePrice IS NOT NULL' : 'animal.salePrice IS NULL',
+            );
+        }
+        if (minPrice !== undefined && maxPrice !== undefined) {
+            queryBuilder.andWhere('CAST(animal.salePrice AS BIGINT) BETWEEN :minPrice AND :maxPrice', {
+                minPrice,
+                maxPrice,
+            });
+        } else if (minPrice !== undefined) {
+            queryBuilder.andWhere('CAST(animal.salePrice AS BIGINT) >= :minPrice', { minPrice });
+        } else if (maxPrice !== undefined) {
+            queryBuilder.andWhere('CAST(animal.salePrice AS BIGINT) <= :maxPrice', { maxPrice });
+        }
 
-    if (specie) {
-      queryBuilder.andWhere('animal.specie ILIKE :specie', { specie: `%${specie}%` });
+        queryBuilder.orderBy('animal.createdAt', 'DESC');
+        queryBuilder.skip(skip).take(limit);
+
+        const [data, total] = await queryBuilder.getManyAndCount();
+
+        return { data, total, page, limit };
     }
 
-    if (breed) {
-      queryBuilder.andWhere('animal.breed ILIKE :breed', { breed: `%${breed}%` });
+    async getPendingAnimalsForVerifier(verifierPubkeyStr: string): Promise<Animal[]> {
+        this.logger.log(`Fetching pending animals for verifier ${verifierPubkeyStr}`);
+
+        return this.animalRepository.find({
+            where: {
+                assignedVerifierPubkey: verifierPubkeyStr,
+                isVerified: false,
+            },
+            relations: ['owner', 'originRanch'],
+            order: { createdAt: 'DESC' },
+        });
     }
 
-    if (ranchPda) {
-      queryBuilder.andWhere('originRanch.pda = :ranchPda', { ranchPda });
+    async findPendingForRancher(rancherPubkey: string): Promise<Animal[]> {
+        this.logger.log(`Fetching pending animals for rancher ${rancherPubkey}`);
+
+        return this.animalRepository.find({
+            where: {
+                owner: { pubkey: rancherPubkey },
+                isVerified: false,
+            },
+            relations: ['owner', 'originRanch'],
+            order: { createdAt: 'DESC' },
+        });
     }
-
-    if (isOnSale !== undefined) {
-      if (isOnSale) {
-        queryBuilder.andWhere('animal.salePrice IS NOT NULL');
-      } else {
-        queryBuilder.andWhere('animal.salePrice IS NULL');
-      }
-    }
-
-    if (minPrice !== undefined && maxPrice !== undefined) {
-      queryBuilder.andWhere('CAST(animal.salePrice AS BIGINT) BETWEEN :minPrice AND :maxPrice', { minPrice, maxPrice });
-    } else if (minPrice !== undefined) {
-      queryBuilder.andWhere('CAST(animal.salePrice AS BIGINT) >= :minPrice', { minPrice });
-    } else if (maxPrice !== undefined) {
-      queryBuilder.andWhere('CAST(animal.salePrice AS BIGINT) <= :maxPrice', { maxPrice });
-    }
-
-    queryBuilder.orderBy('animal.createdAt', 'DESC');
-    queryBuilder.skip(skip).take(limit);
-
-    const [data, total] = await queryBuilder.getManyAndCount();
-
-    this.logger.log(`Found ${total} animals matching filters, returning page ${page}/${Math.ceil(total / limit)}`);
-
-    return { data, total, page, limit };
-  }
-
 }

@@ -13,6 +13,8 @@ pub struct Animal {
     pub specie: String,
     #[max_len(30)]
     pub breed: String,
+    pub is_verified: bool,
+    pub assigned_verifier: Pubkey,
     pub birth_date: i64,
     pub last_sale_price: u64,
     pub sale_price: Option<u64>,

@@ -51,6 +51,10 @@ export class VerifierService {
         pda: verifier.pda,
         name: verifier.name,
       };
+    } else {
+      throw new NotFoundException(
+        `Verifier no encontrado. El verificador debe existir primero.`,
+      );
     }
 
     return { isVerifier: false, pda: null, name: null };
@@ -126,6 +130,68 @@ export class VerifierService {
     return newVerifier;
   }
 
+  async toggleVerifierStatus(pdaToToggle: string): Promise<Verifier> {
+    const program = this.solanaService.getProgram();
+    const verifierPda = new PublicKey(pdaToToggle);
+
+    this.logger.log(
+      `Admin (SuperAuthority) toggling verifier status: ${pdaToToggle}`,
+    );
+
+    // 1. Ejecutar instrucción on-chain
+    try {
+      const txid = await program.methods
+        .toggleVerifierStatus()
+        .accounts({
+          verifierProfile: verifierPda,
+          superAuthority: this.superAuthorityKeypair.publicKey,
+        } as any)
+        .signers([this.superAuthorityKeypair])
+        .rpc({ commitment: 'confirmed' });
+
+      this.logger.log(`Confirmed 'toggle_verifier_status' TX: ${txid}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to toggle verifier status ${pdaToToggle}: ${error.message}`,
+        error.stack,
+      );
+      throw new InternalServerErrorException(
+        `On-chain toggle failed: ${error.message}`,
+      );
+    }
+
+    // 2. Fetch updated data from blockchain
+    let onChainData;
+    try {
+      onChainData = await program.account.verifierProfile.fetch(verifierPda);
+    } catch (e) {
+      this.logger.error(
+        `Failed to fetch verifier PDA ${pdaToToggle} after toggle`,
+        e.stack,
+      );
+      throw new NotFoundException('Verifier not found on-chain after toggle.');
+    }
+
+    // 3. Update database
+    const verifierInDb = await this.verifierRepository.findOne({
+      where: { pda: pdaToToggle },
+      relations: ['user'],
+    });
+
+    if (!verifierInDb) {
+      throw new NotFoundException('Verifier not found in DB after toggle.');
+    }
+
+    verifierInDb.isActive = onChainData.isActive;
+    await this.verifierRepository.save(verifierInDb);
+
+    this.logger.log(
+      `Verifier ${verifierInDb.name} updated to 'isActive: ${onChainData.isActive}' in DB`,
+    );
+
+    return verifierInDb;
+  }
+
   async findAllWithFilters(
     queryDto: FindVerifiersQueryDto,
   ): Promise<{ data: Verifier[]; total: number; page: number; limit: number }> {
@@ -160,11 +226,11 @@ export class VerifierService {
   }
 
   async findAllSimple(): Promise<Verifier[]> {
-     this.logger.log('Fetching all verifiers (simple)');
-     return this.verifierRepository.find({
-       relations: {
-         user: true,
-       },
-     });
+    this.logger.log('Fetching all verifiers (simple)');
+    return this.verifierRepository.find({
+      relations: {
+        user: true,
+      },
+    });
   }
 }

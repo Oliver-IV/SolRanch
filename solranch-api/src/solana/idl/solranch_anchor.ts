@@ -14,6 +14,162 @@ export type SolranchAnchor = {
   },
   "instructions": [
     {
+      "name": "approveAnimal",
+      "discriminator": [
+        34,
+        204,
+        182,
+        113,
+        55,
+        238,
+        168,
+        97
+      ],
+      "accounts": [
+        {
+          "name": "animal",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  110,
+                  99,
+                  104,
+                  95,
+                  97,
+                  110,
+                  105,
+                  109,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "animal.origin_ranch",
+                "account": "animal"
+              },
+              {
+                "kind": "account",
+                "path": "animal.id",
+                "account": "animal"
+              }
+            ]
+          }
+        },
+        {
+          "name": "assignedVerifier",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "animal"
+          ]
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "cancelAnimalRegistration",
+      "discriminator": [
+        3,
+        74,
+        211,
+        215,
+        3,
+        23,
+        137,
+        167
+      ],
+      "accounts": [
+        {
+          "name": "animal",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  110,
+                  99,
+                  104,
+                  95,
+                  97,
+                  110,
+                  105,
+                  109,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "animal.origin_ranch",
+                "account": "animal"
+              },
+              {
+                "kind": "account",
+                "path": "animal.id",
+                "account": "animal"
+              }
+            ]
+          }
+        },
+        {
+          "name": "ranchProfile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  110,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "animal.owner",
+                "account": "animal"
+              }
+            ]
+          }
+        },
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "authority",
+          "relations": [
+            "ranchProfile"
+          ]
+        },
+        {
+          "name": "receiver",
+          "writable": true
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "purchaseAnimal",
       "discriminator": [
         89,
@@ -149,7 +305,8 @@ export type SolranchAnchor = {
               },
               {
                 "kind": "account",
-                "path": "verifier"
+                "path": "verifier_profile.authority",
+                "account": "verifierProfile"
               }
             ]
           }
@@ -165,11 +322,6 @@ export type SolranchAnchor = {
           "relations": [
             "ranchProfile"
           ]
-        },
-        {
-          "name": "verifier",
-          "writable": true,
-          "signer": true
         },
         {
           "name": "systemProgram",
@@ -453,6 +605,102 @@ export type SolranchAnchor = {
       ]
     },
     {
+      "name": "setRanchVerification",
+      "discriminator": [
+        15,
+        208,
+        5,
+        18,
+        219,
+        195,
+        180,
+        54
+      ],
+      "accounts": [
+        {
+          "name": "ranchProfile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  110,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "ranch_profile.authority",
+                "account": "ranchProfile"
+              }
+            ]
+          }
+        },
+        {
+          "name": "superAuthority",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "isVerified",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "toggleVerifierStatus",
+      "discriminator": [
+        83,
+        181,
+        176,
+        225,
+        133,
+        59,
+        167,
+        58
+      ],
+      "accounts": [
+        {
+          "name": "verifierProfile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  101,
+                  114,
+                  105,
+                  102,
+                  105,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "verifier_profile.authority",
+                "account": "verifierProfile"
+              }
+            ]
+          }
+        },
+        {
+          "name": "superAuthority",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "verifyRanch",
       "discriminator": [
         19,
@@ -522,39 +770,78 @@ export type SolranchAnchor = {
   "errors": [
     {
       "code": 6000,
-      "name": "invalidVerifierError"
+      "name": "invalidVerifierError",
+      "msg": "Invalid verifier profile provided."
     },
     {
       "code": 6001,
-      "name": "inactiveVerifierError"
+      "name": "inactiveVerifierError",
+      "msg": "Verifier is not active."
     },
     {
       "code": 6002,
-      "name": "ranchNotVerifiedError"
+      "name": "ranchNotVerifiedError",
+      "msg": "Ranch must be verified to register animals."
     },
     {
       "code": 6003,
-      "name": "invalidOwnerError"
+      "name": "invalidOwnerError",
+      "msg": "Signer is not the owner of the account."
     },
     {
       "code": 6004,
-      "name": "invalidRanchDataError"
+      "name": "invalidRanchDataError",
+      "msg": "Invalid name or country for ranch."
     },
     {
       "code": 6005,
-      "name": "invalidAnimalDataError"
+      "name": "invalidAnimalDataError",
+      "msg": "Invalid ID chip, specie, or breed for animal."
     },
     {
       "code": 6006,
-      "name": "animalNotForSaleError"
+      "name": "animalNotForSaleError",
+      "msg": "Animal is not currently listed for sale."
     },
     {
       "code": 6007,
-      "name": "unauthorizedError"
+      "name": "unauthorizedError",
+      "msg": "Unauthorized access."
     },
     {
       "code": 6008,
-      "name": "ranchAlreadyVerifiedError"
+      "name": "ranchAlreadyVerifiedError",
+      "msg": "Ranch is already verified."
+    },
+    {
+      "code": 6009,
+      "name": "animalAlreadyVerifiedError",
+      "msg": "Animal is already verified."
+    },
+    {
+      "code": 6010,
+      "name": "unauthorizedVerifierError",
+      "msg": "Signer is not the assigned verifier for this animal."
+    },
+    {
+      "code": 6011,
+      "name": "overflowError",
+      "msg": "Operation resulted in an arithmetic overflow."
+    },
+    {
+      "code": 6012,
+      "name": "noStatusChangeError",
+      "msg": "Ranch verification status is already set to the desired value."
+    },
+    {
+      "code": 6013,
+      "name": "unauthorizedCancellationSignerError",
+      "msg": "Only the ranch authority or assigned verifier can cancel."
+    },
+    {
+      "code": 6014,
+      "name": "cannotCancelVerifiedAnimalError",
+      "msg": "Cannot cancel an animal that is already verified."
     }
   ],
   "types": [
@@ -586,6 +873,14 @@ export type SolranchAnchor = {
           {
             "name": "breed",
             "type": "string"
+          },
+          {
+            "name": "isVerified",
+            "type": "bool"
+          },
+          {
+            "name": "assignedVerifier",
+            "type": "pubkey"
           },
           {
             "name": "birthDate",

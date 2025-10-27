@@ -9,6 +9,7 @@ import {
   HttpCode,
   HttpStatus,
   Query,
+  Res,
 } from '@nestjs/common';
 import { RanchService } from './ranch.service';
 import { RegisterRanchDto } from './dto/register-ranch.dto';
@@ -17,11 +18,12 @@ import { AdminGuard } from '../auth/guards/admin.guard';
 import { FindRanchesQueryDto } from './dto/find-ranches-query.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt.guard';
 import { Public } from '../auth/decorators/public.decorator';
+import { SetRanchVerificationDto } from './dto/set-ranch-verification.dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('ranch')
 export class RanchController {
-  constructor(private readonly ranchService: RanchService) {}
+  constructor(private readonly ranchService: RanchService) { }
 
   @Post('build-tx')
   async buildRegisterRanch(
@@ -36,6 +38,7 @@ export class RanchController {
   async confirmRegisterRanch(
     @Body() dto: ConfirmRanchDto,
     @Req() req,
+    @Res({ passthrough: true }) res: Response
   ) {
     console.log('>>> [RANCH CONTROLLER] req.user:', req.user);
     const userPubkey: string = req.user.pubkey;
@@ -43,10 +46,25 @@ export class RanchController {
   }
 
   @Post('verify/:pda')
-  @UseGuards(AdminGuard) 
+  @UseGuards(AdminGuard)
   @HttpCode(HttpStatus.OK)
   async verifyRanch(@Param('pda') pda: string) {
-    return this.ranchService.verifyRanch(pda);
+    try {
+      const result = await this.ranchService.verifyRanch(pda);
+      return result;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  @Post('set-verification/:pda')
+  @UseGuards(AdminGuard)
+  @HttpCode(HttpStatus.OK)
+  async setRanchVerification(
+    @Param('pda') pda: string,
+    @Body() dto: SetRanchVerificationDto,
+  ) {
+    return this.ranchService.setRanchVerification(pda, dto.isVerified);
   }
 
   @Get('me')
@@ -55,7 +73,7 @@ export class RanchController {
     return this.ranchService.findMyRanch(userPubkey);
   }
 
-  @Get() 
+  @Get()
   @Public()
   @HttpCode(HttpStatus.OK)
   findAllWithFilters(@Query() queryDto: FindRanchesQueryDto) {

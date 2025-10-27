@@ -44,12 +44,13 @@ pub mod solranch_anchor {
         breed: String,
         birth_date: i64,
     ) -> Result<()> {
-        validate_register_animal(&id_chip, &specie, &breed)?;
+        validate_register_animal(&id_chip, &specie, &breed)?; 
         let ranch_profile = &mut ctx.accounts.ranch_profile;
         let animal = &mut ctx.accounts.animal;
+
         animal.owner = ctx.accounts.authority.key();
         animal.origin_ranch = ranch_profile.key();
-        animal.id = ranch_profile.animal_count;
+        animal.id = ranch_profile.animal_count; 
         animal.id_chip = id_chip;
         animal.specie = specie;
         animal.breed = breed;
@@ -58,7 +59,13 @@ pub mod solranch_anchor {
         animal.sale_price = None;
         animal.last_sale_price = 0;
         animal.bump = ctx.bumps.animal;
-        ranch_profile.animal_count += 1;
+
+        animal.is_verified = false;
+        animal.assigned_verifier = ctx.accounts.verifier_profile.authority; 
+
+        ranch_profile.animal_count = ranch_profile.animal_count.checked_add(1)
+            .ok_or(SolranchError::OverflowError)?;
+
         Ok(())
     }
 
@@ -120,6 +127,34 @@ pub mod solranch_anchor {
         animal.last_sale_price = sale_price;
         animal.allowed_buyer = None;
         animal.sale_price = None;
+        Ok(())
+    }
+
+    pub fn approve_animal(ctx: Context<ApproveAnimal>) -> Result<()> {
+        let animal = &mut ctx.accounts.animal;
+        require!(!animal.is_verified, SolranchError::AnimalAlreadyVerifiedError);
+        animal.is_verified = true;
+        Ok(())
+    }
+
+    pub fn toggle_verifier_status(ctx: Context<ToggleVerifierStatus>) -> Result<()> {
+        let verifier = &mut ctx.accounts.verifier_profile;
+        verifier.is_active = !verifier.is_active;
+        Ok(())
+    }
+
+    pub fn set_ranch_verification(ctx: Context<SetRanchVerification>, is_verified: bool) -> Result<()> {
+        let ranch = &mut ctx.accounts.ranch_profile;
+        require!(ranch.is_verified != is_verified, SolranchError::NoStatusChangeError); 
+        ranch.is_verified = is_verified;
+        Ok(())
+    }
+
+    pub fn cancel_animal_registration(ctx: Context<CancelAnimalRegistration>) -> Result<()> {
+        let ranch_profile = &mut ctx.accounts.ranch_profile;
+
+        ranch_profile.animal_count = ranch_profile.animal_count.checked_sub(1)
+            .ok_or(SolranchError::OverflowError)?;
         Ok(())
     }
 }

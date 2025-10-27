@@ -1,4 +1,3 @@
-// 📍 Archivo: src/auth/guards/jwt-auth.guard.ts
 import { ExecutionContext, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { AuthGuard } from '@nestjs/passport'; // Importa el genérico
@@ -11,7 +10,6 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     super();
   }
 
-  // Sobrescribe el método canActivate
   canActivate(context: ExecutionContext): boolean | Promise<boolean> | Observable<boolean> {
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
       context.getHandler(), 

@@ -37,8 +37,7 @@ import { PendingTransaction } from './animal/entities/pending-tx.entity';
           Ranch,
           User,
           Animal,
-          Verifier,
-          PendingTransaction
+          Verifier
         ]
       })
     }),

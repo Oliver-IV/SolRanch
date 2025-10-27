@@ -8,13 +8,13 @@ import {
     UseGuards,
     HttpCode,
     HttpStatus,
-    Query, 
+    Query,
+    Delete,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { AnimalService } from './animal.service';
 import { VerifierGuard } from '../auth/guards/verifier.guard';
 import { CreateAnimalDto } from './dto/create-animal.dto';
-import { AddRancherSignatureDto } from './dto/add-rancher-signature.dto';
 import { ConfirmAnimalDto } from './dto/confirm-animal.dto';
 import { RancherGuard } from '../auth/guards/rancher.guard';
 import { SetAnimalPriceDto } from './dto/set-animal-price.dto';
@@ -23,43 +23,72 @@ import { SetAllowedBuyerDto } from './dto/set-allowed-buyer.dto';
 import { FindAnimalsQueryDto } from './dto/find-animals-query.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt.guard';
 import { Public } from '../auth/decorators/public.decorator';
+import { AddRancherSignatureDto } from './dto/add-rancher-signature.dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('animal')
 export class AnimalController {
-    constructor(private readonly animalService: AnimalService) { }
+    constructor(private readonly animalService: AnimalService) {}
 
     @Post('build-tx')
     @UseGuards(RancherGuard)
     @HttpCode(HttpStatus.CREATED)
     buildTx(@Body() dto: CreateAnimalDto, @Req() req) {
-        return this.animalService.buildTx(dto, req.user.pubkey);
+        return this.animalService.buildRegisterAnimalTx(dto, req.user.pubkey);
     }
 
-    @Post('rancher-sign')
+    @Post('confirm')
+    @UseGuards(RancherGuard)
+    @HttpCode(HttpStatus.CREATED)
+    confirmRegistration(@Body() dto: ConfirmTxDto, @Req() req) {
+        return this.animalService.confirmRegisterAnimal(dto, req.user.pubkey);
+    }
+
+    @Post('cancel-tx/:pda/build')
     @UseGuards(RancherGuard)
     @HttpCode(HttpStatus.OK)
-    addRancherSignature(@Body() dto: AddRancherSignatureDto, @Req() req) {
-        return this.animalService.addRancherSignature(dto, req.user.pubkey);
+    buildCancelAnimalTx(@Param('pda') animalPda: string, @Req() req) {
+        return this.animalService.buildCancelAnimalTx(animalPda, req.user.pubkey);
+    }
+
+    @Post('reject-tx/:pda/build')
+    @UseGuards(VerifierGuard)
+    @HttpCode(HttpStatus.OK)
+    buildRejectAnimalTx(@Param('pda') animalPda: string, @Req() req) {
+        return this.animalService.buildRejectAnimalTx(animalPda, req.user.pubkey);
+    }
+
+    @Post('reject-tx/:pda/confirm')
+    @UseGuards(VerifierGuard)
+    @HttpCode(HttpStatus.OK)
+    confirmRejectAnimal(@Param('pda') animalPda: string, @Body() dto: ConfirmTxDto, @Req() req) {
+        return this.animalService.confirmRejectAnimal(animalPda, dto, req.user.pubkey);
+    }
+
+    @Post('cancel-tx/:pda/confirm')
+    @UseGuards(RancherGuard)
+    @HttpCode(HttpStatus.OK)
+    confirmCancelAnimal(@Param('pda') animalPda: string, @Body() dto: ConfirmTxDto, @Req() req) {
+        return this.animalService.confirmCancelAnimal(animalPda, dto, req.user.pubkey);
     }
 
     @Get('pending-for-me')
     @UseGuards(VerifierGuard)
     getPendingForVerifier(@Req() req) {
-        return this.animalService.getPendingForVerifier(req.user.pubkey);
+        return this.animalService.getPendingAnimalsForVerifier(req.user.pubkey);
     }
 
-    @Get('pending-tx/:pda')
+    @Get('pending-tx/:pda/build')
     @UseGuards(VerifierGuard)
-    getTxForVerifier(@Param('pda') animalPda: string, @Req() req) {
-        return this.animalService.getTxForVerifier(animalPda, req.user.pubkey);
+    buildApproveAnimalTx(@Param('pda') animalPda: string, @Req() req) {
+        return this.animalService.buildApproveAnimalTx(animalPda, req.user.pubkey);
     }
 
-    @Post('confirm')
+    @Post('pending-tx/:pda/confirm')
     @UseGuards(VerifierGuard)
     @HttpCode(HttpStatus.CREATED)
-    confirmRegistration(@Body() dto: ConfirmAnimalDto, @Req() req) {
-        return this.animalService.confirmRegistration(dto, req.user.pubkey);
+    confirmApproveAnimal(@Param('pda') animalPda: string, @Body() dto: ConfirmTxDto, @Req() req) {
+        return this.animalService.confirmApproveAnimal(animalPda, dto, req.user.pubkey);
     }
 
     @Post(':pda/build-set-price')
@@ -74,13 +103,13 @@ export class AnimalController {
         return this.animalService.confirmSetPrice(pda, dto, req.user.pubkey);
     }
 
-    @Post(':pda/build-set-allowed-buyer') 
+    @Post(':pda/build-set-allowed-buyer')
     @HttpCode(HttpStatus.OK)
     buildSetAllowedBuyerTx(@Param('pda') pda: string, @Body() dto: SetAllowedBuyerDto, @Req() req) {
         return this.animalService.buildSetAllowedBuyerTx(pda, dto, req.user.pubkey);
     }
 
-    @Post(':pda/confirm-set-allowed-buyer') 
+    @Post(':pda/confirm-set-allowed-buyer')
     @HttpCode(HttpStatus.OK)
     confirmSetAllowedBuyer(@Param('pda') pda: string, @Body() dto: ConfirmTxDto, @Req() req) {
         return this.animalService.confirmSetAllowedBuyer(pda, dto, req.user.pubkey);
@@ -98,6 +127,12 @@ export class AnimalController {
         return this.animalService.confirmPurchase(pda, dto, req.user.pubkey);
     }
 
+    @Get('pending/me')
+    @UseGuards(RancherGuard)
+    getMyPendingAnimals(@Req() req) {
+        return this.animalService.findPendingForRancher(req.user.pubkey);
+    }
+
     @Get(':pda')
     @Public()
     findAnimalByPda(@Param('pda') pda: string) {
@@ -110,5 +145,4 @@ export class AnimalController {
     findAllWithFilters(@Query() queryDto: FindAnimalsQueryDto) {
         return this.animalService.findAllWithFilters(queryDto);
     }
-
 }
