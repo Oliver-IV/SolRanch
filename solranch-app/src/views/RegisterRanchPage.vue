@@ -8,6 +8,7 @@ import api from '@/services/api';
 import { Home, Loader2, AlertTriangle } from 'lucide-vue-next';
 import bs58 from 'bs58';
 import { useAuthStore } from '@/stores/auth';
+import { RPC_URL } from "../utils/configs.js"
 
 const Country = {
   OTHER: 'other', // Value matches backend
@@ -58,7 +59,6 @@ const countryOptions = computed(() => {
 const router = useRouter();
 const { publicKey, signTransaction, conn } = useWallet(); 
 
-const RPC_URL = 'http://127.0.0.1:8899'; 
 const connection = new Connection(RPC_URL, 'confirmed');
 
 const ranchName = ref('');

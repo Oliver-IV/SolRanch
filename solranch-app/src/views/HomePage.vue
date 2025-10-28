@@ -1,15 +1,13 @@
-{/* src/views/HomePage.vue */}
 <script setup>
 import { ref, onMounted, computed } from 'vue'
-import { Search, Filter, X, ChevronLeft, ChevronRight, MapPin } from 'lucide-vue-next'
+import { Search, Filter, X, ChevronLeft, ChevronRight, MapPin, DollarSign } from 'lucide-vue-next'
 import api from '../services/api'
 import AnimalCard from '../components/AnimalCard.vue'
+import { convertUSDToLamports } from '../utils/solana-prices'
 
 // --- Objeto Country (Valores en camelCase como en el backend) ---
 const Country = {
-  OTHER: 'other', // Value matches backend
-
-  // America
+  OTHER: 'other',
   UNITED_STATES: 'unitedStates',
   BRAZIL: 'brazil',
   ARGENTINA: 'argentina',
@@ -18,8 +16,6 @@ const Country = {
   COLOMBIA: 'colombia',
   URUGUAY: 'uruguay',
   PARAGUAY: 'paraguay',
-
-  // Europe
   FRANCE: 'france',
   GERMANY: 'germany',
   UNITED_KINGDOM: 'unitedKingdom',
@@ -29,8 +25,6 @@ const Country = {
   POLAND: 'poland',
   NETHERLANDS: 'netherlands',
   RUSSIA: 'russia',
-
-  // Asia and Pacific
   CHINA: 'china',
   INDIA: 'india',
   AUSTRALIA: 'australia',
@@ -52,15 +46,14 @@ const countryOptions = computed(() => {
   })).sort((a, b) => a.text.localeCompare(b.text)); 
 });
 
-
 const animals = ref([])
 const loading = ref(true)
 const filters = ref({
   specie: '',
   breed: '',
   country: '',
-  minPrice: '',
-  maxPrice: '',
+  minPriceUSD: '',
+  maxPriceUSD: '',
   isOnSale: 'true',
 })
 const pagination = ref({
@@ -68,8 +61,6 @@ const pagination = ref({
   limit: 12,
   total: 0,
 })
-
-const lamportsPerSol = 1_000_000_000
 
 // --- Computed ---
 const totalPages = computed(() => {
@@ -92,7 +83,6 @@ const paginationButtons = computed(() => {
   return Array.from({ length: end - start + 1 }, (_, i) => start + i);
 });
 
-
 // --- Methods ---
 const fetchAnimals = async () => {
   loading.value = true
@@ -102,10 +92,18 @@ const fetchAnimals = async () => {
       limit: pagination.value.limit,
       ...(filters.value.specie.trim() && { specie: filters.value.specie.trim() }),
       ...(filters.value.breed.trim() && { breed: filters.value.breed.trim() }),
-      ...(filters.value.country && { country: filters.value.country }), // Send the selected camelCase value
-      ...(filters.value.minPrice && { minPrice: Math.floor(parseFloat(filters.value.minPrice) * lamportsPerSol) }),
-      ...(filters.value.maxPrice && { maxPrice: Math.floor(parseFloat(filters.value.maxPrice) * lamportsPerSol) }),
+      ...(filters.value.country && { country: filters.value.country }),
       ...(filters.value.isOnSale !== 'all' && { isOnSale: filters.value.isOnSale === 'true' }),
+    }
+
+    // Convertir USD a lamports si hay precios
+    if (filters.value.minPriceUSD) {
+      const minLamports = await convertUSDToLamports(parseFloat(filters.value.minPriceUSD))
+      if (minLamports) params.minPrice = minLamports
+    }
+    if (filters.value.maxPriceUSD) {
+      const maxLamports = await convertUSDToLamports(parseFloat(filters.value.maxPriceUSD))
+      if (maxLamports) params.maxPrice = maxLamports
     }
 
     const response = await api.animals.getAll(params)
@@ -131,10 +129,10 @@ const clearFilters = () => {
   filters.value = {
     specie: '',
     breed: '',
-    country: '', // Clear country
-    minPrice: '',
-    maxPrice: '',
-    isOnSale: 'true', // Reset to default
+    country: '',
+    minPriceUSD: '',
+    maxPriceUSD: '',
+    isOnSale: 'true',
   }
   applyFilters()
 }
@@ -191,7 +189,8 @@ onMounted(() => {
            >
              <option value="">All Countries</option>
              <option v-for="option in countryOptions" :key="option.value" :value="option.value">
-               {{ option.text }} </option>
+               {{ option.text }}
+             </option>
            </select>
          </div>
 
@@ -204,15 +203,18 @@ onMounted(() => {
            </select>
          </div>
 
-
         <div class="col-span-1">
-          <label for="min-price" class="block text-sm font-medium text-brand-text-light mb-1.5">Min Price (SOL)</label>
-          <input id="min-price" v-model="filters.minPrice" @keyup.enter="applyFilters" type="number" min="0" step="0.1" placeholder="0" class="input-field" />
+          <label for="min-price" class="block text-sm font-medium text-brand-text-light mb-1.5 flex items-center gap-1">
+            <DollarSign class="h-4 w-4" /> Min Price (USD)
+          </label>
+          <input id="min-price" v-model="filters.minPriceUSD" @keyup.enter="applyFilters" type="number" min="0" step="1" placeholder="0" class="input-field" />
         </div>
 
         <div class="col-span-1">
-          <label for="max-price" class="block text-sm font-medium text-brand-text-light mb-1.5">Max Price (SOL)</label>
-          <input id="max-price" v-model="filters.maxPrice" @keyup.enter="applyFilters" type="number" min="0" step="0.1" placeholder="100" class="input-field" />
+          <label for="max-price" class="block text-sm font-medium text-brand-text-light mb-1.5 flex items-center gap-1">
+            <DollarSign class="h-4 w-4" /> Max Price (USD)
+          </label>
+          <input id="max-price" v-model="filters.maxPriceUSD" @keyup.enter="applyFilters" type="number" min="0" step="1" placeholder="10000" class="input-field" />
         </div>
 
         <div class="col-span-full sm:col-span-2 lg:col-span-2 flex flex-col sm:flex-row gap-3 sm:items-end justify-end pt-4 sm:pt-0 lg:col-start-3 xl:col-start-auto xl:col-span-2">
@@ -274,13 +276,12 @@ onMounted(() => {
 </template>
 
 <style scoped>
-/* Estilos reutilizables para inputs y botones */
 .input-field {
   @apply block w-full border-gray-300 rounded-lg shadow-sm p-2.5 focus:ring-2 focus:ring-solana-purple focus:border-transparent transition text-sm;
 }
 .select-field {
-   @apply block w-full border-gray-300 rounded-lg shadow-sm p-2.5 focus:ring-2 focus:ring-solana-purple focus:border-transparent transition text-sm appearance-none bg-no-repeat bg-right pr-8; /* Add appearance-none */
-   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E"); /* Simple chevron */
+   @apply block w-full border-gray-300 rounded-lg shadow-sm p-2.5 focus:ring-2 focus:ring-solana-purple focus:border-transparent transition text-sm appearance-none bg-no-repeat bg-right pr-8;
+   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
    background-position: right 0.7rem center;
    background-size: 1.1em 1.1em;
 }
@@ -297,7 +298,6 @@ onMounted(() => {
    @apply bg-solana-purple text-white border-y border-solana-purple z-10 hover:bg-solana-purple;
 }
 
-/* Gradiente de Texto */
 .bg-clip-text {
   -webkit-background-clip: text;
   background-clip: text;

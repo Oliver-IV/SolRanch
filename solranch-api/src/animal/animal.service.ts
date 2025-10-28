@@ -155,7 +155,6 @@ export class AnimalService {
 
         const owner = await this.userRepository.findOne({ where: { pubkey: onChainData.owner.toBase58() } });
         const originRanch = await this.ranchRepository.findOne({ where: { pda: onChainData.originRanch.toBase58() } });
-
         if (!owner || !originRanch) {
             this.logger.error('Owner or ranch not found in DB after on-chain confirm', { owner: !!owner, originRanch: !!originRanch });
             throw new InternalServerErrorException('Owner or ranch not found in database.');
@@ -174,6 +173,7 @@ export class AnimalService {
             salePrice: onChainData.salePrice?.toString() ?? null,
             lastSalePrice: onChainData.lastSalePrice.toString(),
             allowedBuyerPubkey: onChainData.allowedBuyer?.toBase58() ?? null,
+            ownerRanch: originRanch
         });
 
         await this.animalRepository.save(newAnimal);
@@ -686,6 +686,12 @@ export class AnimalService {
             throw new NotFoundException(`Animal not found.`);
         }
 
+        const ownerRanch = await this.ranchRepository.findOneBy({ user: newOwner });
+
+        if (!ownerRanch)
+            throw new NotFoundException("Not new owner ranch found");
+
+        animalInDb.ownerRanch = ownerRanch;
         animalInDb.owner = newOwner;
         animalInDb.lastSalePrice = onChainData.lastSalePrice.toString();
         animalInDb.salePrice = onChainData.salePrice?.toString() ?? null;
@@ -699,7 +705,7 @@ export class AnimalService {
     async findAnimalByPda(pda: string): Promise<Animal> {
         const animal = await this.animalRepository.findOne({
             where: { pda },
-            relations: ['owner', 'originRanch'],
+            relations: ['owner', 'originRanch', 'ownerRanch'],
         });
 
         if (!animal) {
@@ -721,12 +727,15 @@ export class AnimalService {
         const queryBuilder = this.animalRepository
             .createQueryBuilder('animal')
             .leftJoinAndSelect('animal.owner', 'owner')
-            .leftJoinAndSelect('animal.originRanch', 'originRanch');
+            .leftJoinAndSelect('animal.originRanch', 'originRanch')
+            .leftJoinAndSelect('animal.ownerRanch', 'ownerRanch');
 
         if (specie) queryBuilder.andWhere('animal.specie ILIKE :specie', { specie: `%${specie}%` });
         if (breed) queryBuilder.andWhere('animal.breed ILIKE :breed', { breed: `%${breed}%` });
-        if (ranchPda) queryBuilder.andWhere('originRanch.pda = :ranchPda', { ranchPda });
-        if (country) queryBuilder.andWhere('originRanch.country = :country', { country });
+        if (ranchPda) {
+            queryBuilder.andWhere('ownerRanch.pda = :ranchPda', { ranchPda });
+        }
+        if (country) queryBuilder.andWhere('ownerRanch.country = :country', { country });
         if (isOnSale !== undefined) {
             queryBuilder.andWhere(
                 isOnSale ? 'animal.salePrice IS NOT NULL' : 'animal.salePrice IS NULL',
@@ -746,10 +755,15 @@ export class AnimalService {
         queryBuilder.orderBy('animal.createdAt', 'DESC');
         queryBuilder.skip(skip).take(limit);
 
-        const [data, total] = await queryBuilder.getManyAndCount();
-
-        return { data, total, page, limit };
+        try {
+            const [data, total] = await queryBuilder.getManyAndCount();
+            return { data, total, page, limit };
+        } catch (queryError) {
+            console.error("Error executing animal query:", queryError);
+            throw new InternalServerErrorException("Failed to retrieve animals.");
+        }
     }
+
 
     async getPendingAnimalsForVerifier(verifierPubkeyStr: string): Promise<Animal[]> {
         this.logger.log(`Fetching pending animals for verifier ${verifierPubkeyStr}`);
@@ -759,7 +773,7 @@ export class AnimalService {
                 assignedVerifierPubkey: verifierPubkeyStr,
                 isVerified: false,
             },
-            relations: ['owner', 'originRanch'],
+            relations: ['owner', 'originRanch', 'ownerRanch'],
             order: { createdAt: 'DESC' },
         });
     }

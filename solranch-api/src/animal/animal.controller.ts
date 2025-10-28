@@ -94,12 +94,14 @@ export class AnimalController {
     @Post(':pda/build-set-price')
     @HttpCode(HttpStatus.OK)
     buildSetPriceTx(@Param('pda') pda: string, @Body() dto: SetAnimalPriceDto, @Req() req) {
+        console.log("PDA: " + pda) ;
         return this.animalService.buildSetPriceTx(pda, dto, req.user.pubkey);
     }
 
     @Post(':pda/confirm-set-price')
     @HttpCode(HttpStatus.OK)
     confirmSetPrice(@Param('pda') pda: string, @Body() dto: ConfirmTxDto, @Req() req) {
+        console.log("PDA: " + pda) ;
         return this.animalService.confirmSetPrice(pda, dto, req.user.pubkey);
     }
 

@@ -1,7 +1,9 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { BadgeCheck, Eye } from 'lucide-vue-next'
+import { Eye } from 'lucide-vue-next'
+import { convertLamportsToUSD } from '../utils/solana-prices'
+import { getSpeciesIcon } from "../utils/species" ;
 
 const props = defineProps({
   animal: {
@@ -11,27 +13,23 @@ const props = defineProps({
 })
 
 const router = useRouter()
+const priceUSD = ref(null)
+const loadingPrice = ref(true)
 
-// Calculate price in SOL
-const priceInSol = computed(() => {
-  if (!props.animal.salePrice || props.animal.salePrice === '0') return null // Also check for "0"
-  try {
-    // Use Number for SOL conversion, BigInt might be overkill here
-    const priceLamports = BigInt(props.animal.salePrice)
-    const sol = Number(priceLamports) / 1_000_000_000;
-    // Format nicely, handling potential floating point issues
-    return sol.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 4 });
-  } catch (e) {
-    console.error("Error parsing salePrice:", props.animal.salePrice, e);
-    return null; // Handle potential parsing errors
-  }
+// Determine if the animal is for sale
+const isForSale = computed(() => {
+  return props.animal.salePrice && props.animal.salePrice !== '0' && BigInt(props.animal.salePrice) > 0n
 })
 
-// Determine if the animal is for sale based on priceInSol calculation
-const isForSale = computed(() => priceInSol.value !== null)
+// Load price on mount
+onMounted(async () => {
+  if (isForSale.value) {
+    priceUSD.value = await convertLamportsToUSD(props.animal.salePrice)
+  }
+  loadingPrice.value = false
+})
 
 const viewDetails = () => {
-  // Check if animal and pda exist before navigating
   if (props.animal && props.animal.pda) {
     router.push(`/animal/${props.animal.pda}`)
   } else {
@@ -46,7 +44,7 @@ const viewDetails = () => {
     @click="viewDetails"
   >
     <div class="bg-gradient-to-br from-gray-100 to-gray-200 h-48 flex items-center justify-center relative overflow-hidden">
-      <div class="text-6xl opacity-20">🐄</div>
+      <div class="text-6xl opacity-20">{{  getSpeciesIcon(animal.specie)  }}</div>
       <div class="absolute top-3 right-3">
         <span v-if="isForSale" class="bg-green-500 text-white text-xs font-bold px-3 py-1 rounded-full shadow">
           For Sale
@@ -71,8 +69,15 @@ const viewDetails = () => {
        </div>
 
        <div class="pt-3 border-t border-gray-100">
-         <div class="min-h-[3rem] mb-3"> <p v-if="isForSale" class="text-2xl font-bold text-solana-cyan-dark">
-             {{ priceInSol }} SOL
+         <div class="min-h-[3rem] mb-3">
+           <p v-if="loadingPrice && isForSale" class="text-sm text-brand-text-light italic">
+             Loading price...
+           </p>
+           <p v-else-if="isForSale && priceUSD !== null" class="text-2xl font-bold text-green-600">
+             ${{ priceUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}
+           </p>
+           <p v-else-if="isForSale && priceUSD === null" class="text-sm text-orange-600 italic">
+             Price unavailable
            </p>
            <p v-else class="text-sm text-brand-text-light italic pt-1">
              Price not set

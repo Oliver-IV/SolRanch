@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, reactive } from 'vue';
 import { useRouter } from 'vue-router';
 import { useWallet } from 'solana-wallets-vue';
 import { Transaction, Connection, VersionedTransaction } from '@solana/web3.js';
@@ -20,11 +20,12 @@ import ErrorModal from '@/components/ErrorModal.vue';
 import SetPriceModal from '@/components/SetPriceModal.vue';
 import SetAllowedBuyerModal from '@/components/SetAllowedBuyerModal.vue';
 import AnimalDetailsModal from '../components/AnimalDetailsModal.vue';
+import { convertLamportsToUSDString } from "../utils/solana-prices.js"
+import { RPC_URL } from '../utils/configs.js';
 
 const router = useRouter();
 const { publicKey, signTransaction } = useWallet();
 
-const RPC_URL = 'http://127.0.0.1:8899';
 const connection = new Connection(RPC_URL, 'confirmed');
 
 const ranch = ref(null);
@@ -53,7 +54,6 @@ const showConfirmDeleteModal = ref(false);
 const animalToDelete = ref(null);
 const deletingPda = ref(null);
 
-// New state for set price and allowed buyer
 const showSetPriceModal = ref(false);
 const showSetAllowedBuyerModal = ref(false);
 const selectedAnimal = ref(null);
@@ -83,6 +83,30 @@ const isFormValid = computed(() => {
     animalForm.value.birth_date &&
     animalForm.value.verifier_pda;
 });
+
+const animalUsdPrices = reactive(new Map());
+
+const fetchAndStoreAnimalPrice = async (animal) => {
+  if (!animal || !animal.pda) {
+      if(animal && animal.pda) animalUsdPrices.set(animal.pda, "N/A"); 
+      return; 
+  }
+  if (animalUsdPrices.has(animal.pda) || !animal.salePrice || animal.salePrice === '0') {
+      if(!animal.salePrice || animal.salePrice === '0') {
+        animalUsdPrices.set(animal.pda, "Not for Sale");
+      }
+      return; 
+  }
+
+  animalUsdPrices.set(animal.pda, "Loading...");
+  try {
+    const usdString = await convertLamportsToUSDString(animal.salePrice);
+    animalUsdPrices.set(animal.pda, usdString);
+  } catch (e) {
+    console.error(`Failed to get price for ${animal.pda}`, e);
+    animalUsdPrices.set(animal.pda, "Price Error");
+  }
+};
 
 const formatDate = (timestamp) => {
   if (!timestamp) return 'N/A';
@@ -120,8 +144,10 @@ const fetchData = async () => {
       api.animals.getPendingForRancher()
     ]);
     const allRanchAnimals = confirmedResponse.data.data || [];
+    console.log(confirmedResponse) ;
     animals.value = allRanchAnimals.filter(animal => animal.isVerified === true);
     pendingAnimals.value = pendingResponse.data || [];
+    animals.value.forEach(animal => fetchAndStoreAnimalPrice(animal));
 
   } catch (err) {
     console.error('❌ Error fetching ranch data:', err);
@@ -305,8 +331,10 @@ const confirmDelete = async () => {
 
 // New functions for set price and allowed buyer
 const openSetPriceModal = (animal) => {
+  console.log('openSetPriceModal called, animal:', animal);
   selectedAnimal.value = animal;
   showSetPriceModal.value = true;
+  console.log('showSetPriceModal after set:', showSetPriceModal.value, 'selectedAnimal:', selectedAnimal.value);
 };
 
 const openSetAllowedBuyerModal = (animal) => {
@@ -460,6 +488,10 @@ onMounted(async () => {
             <div class="flex items-center gap-2">
               <CheckCircle class="h-3.5 w-3.5" />
               <span class="font-mono">{{ animal.pda.slice(0, 8) }}...{{ animal.pda.slice(-6) }}</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <CheckCircle class="h-3.5 w-3.5" />
+              <span class="font-mono">{{ animalUsdPrices.get(animal.pda) }}</span>
             </div>
           </div>
 
@@ -654,7 +686,6 @@ onMounted(async () => {
     </Teleport>
     <SuccessModal v-model="showSuccessModal" :message="successMessage" />
     <ErrorModal v-model="showErrorModal" :message="errorMessage" />
-    <AnimalDetailsModal v-model="showDetailsModal" :animal="selectedAnimal" />
     <Teleport to="body">
       <transition name="modal-fade">
         <div v-if="showConfirmDeleteModal" @click="closeConfirmDeleteModal"
@@ -669,7 +700,7 @@ onMounted(async () => {
             <p class="text-center text-brand-text-light mb-6">
               Do you want to delete the pending registration for
               <strong class="font-mono">{{ animalToDelete?.idChip || animalToDelete?.pda?.slice(0, 6)
-              }}</strong>?
+                }}</strong>?
             </p>
             <div class="flex gap-3">
               <button @click="closeConfirmDeleteModal" class="button-secondary flex-1">
@@ -687,19 +718,15 @@ onMounted(async () => {
     </Teleport>
 
     <Teleport to="body">
-
-      <SetPriceModal v-if="showSetPriceModal" :animal="selectedAnimal" @close="showSetPriceModal = false"
+      <SetPriceModal v-if="showSetPriceModal" :animal="selectedAnimal" :modelValue="true" @close="showSetPriceModal = false"
         @success="handleSetPriceSuccess" @error="(msg) => { errorMessage = msg; showErrorModal = true; }" />
-
     </Teleport>
-
     <Teleport to="body">
-
       <SetAllowedBuyerModal v-if="showSetAllowedBuyerModal" :animal="selectedAnimal"
         @close="showSetAllowedBuyerModal = false" @success="handleSetAllowedBuyerSuccess"
         @error="(msg) => { errorMessage = msg; showErrorModal = true; }" />
-
     </Teleport>
+    <AnimalDetailsModal v-model="showDetailsModal" :animal="selectedAnimal" />
   </div>
 </template>
 

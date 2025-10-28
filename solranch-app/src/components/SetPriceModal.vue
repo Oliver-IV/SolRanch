@@ -1,10 +1,11 @@
 <script setup>
 import { ref, computed } from 'vue';
 import { useWallet } from 'solana-wallets-vue';
-import { Connection, VersionedTransaction } from '@solana/web3.js';
+import { Connection, Transaction } from '@solana/web3.js';
 import { Buffer } from 'buffer';
 import api from '@/services/api';
 import { X, DollarSign, Loader2, Check, AlertTriangle } from 'lucide-vue-next';
+import { RPC_URL } from '../utils/configs';
 
 defineOptions({
   name: 'SetPriceModal'
@@ -15,11 +16,10 @@ const props = defineProps({
   animal: Object,
 });
 
-const emit = defineEmits(['update:modelValue', 'success']);
+const emit = defineEmits(['update:modelValue', 'close', 'success', 'error']);
 
 const { publicKey, signTransaction } = useWallet();
 
-const RPC_URL = 'http://127.0.0.1:8899';
 const connection = new Connection(RPC_URL, 'confirmed');
 
 const price = ref('');
@@ -33,7 +33,7 @@ const isValid = computed(() => {
 });
 
 const close = () => {
-  emit('update:modelValue', false);
+  emit('close');
   price.value = '';
   error.value = null;
   step.value = 'form';
@@ -41,13 +41,20 @@ const close = () => {
 };
 
 const handleSetPrice = async () => {
-  if (!isValid.value || !publicKey.value || !signTransaction.value || !props.animal) return;
+  if (!isValid.value || !publicKey.value || !signTransaction.value || !props.animal || !props.animal.pda) {
+    console.error("SetPriceModal Error: Animal PDA is missing.", props.animal);
+    error.value = "Cannot set price: Animal identifier is missing.";
+    processing.value = false; 
+    step.value = 'form';
+    emit('error', error.value); 
+    return;
+  }
 
   processing.value = true;
   error.value = null;
 
   try {
-    const priceInLamports = Math.floor(parseFloat(price.value) * 1_000_000_000);
+    const priceInLamports = Math.floor(parseFloat(price.value) * 1_000_000_000); 
 
     step.value = 'building';
     const buildResponse = await api.animals.buildSetPriceTx(props.animal.pda, {
@@ -55,20 +62,26 @@ const handleSetPrice = async () => {
     });
 
     const txBase64 = buildResponse.data.transaction;
+    const buildBlockhash = buildResponse.data.blockhash; 
 
     step.value = 'signing';
-    const versionedTx = VersionedTransaction.deserialize(Buffer.from(txBase64, 'base64'));
-    const signedTx = await signTransaction.value(versionedTx);
+
+    const txBuffer = Buffer.from(txBase64, 'base64');
+    const tx = Transaction.from(txBuffer); 
+    const latestBlockhashForSend = await connection.getLatestBlockhash('confirmed');
+    tx.recentBlockhash = latestBlockhashForSend.blockhash;
+    tx.lastValidBlockHeight = latestBlockhashForSend.lastValidBlockHeight;
+
+    const signedTx = await signTransaction.value(tx);
 
     step.value = 'sending';
     const txid = await connection.sendRawTransaction(signedTx.serialize());
 
     step.value = 'confirming';
-    const latestBlockhash = await connection.getLatestBlockhash('confirmed');
     const confirmationResult = await connection.confirmTransaction({
       signature: txid,
-      blockhash: latestBlockhash.blockhash,
-      lastValidBlockHeight: latestBlockhash.lastValidBlockHeight
+      blockhash: latestBlockhashForSend.blockhash, 
+      lastValidBlockHeight: latestBlockhashForSend.lastValidBlockHeight
     }, 'confirmed');
 
     if (confirmationResult.value?.err) {
@@ -77,9 +90,9 @@ const handleSetPrice = async () => {
 
     step.value = 'confirming-backend';
     await api.animals.confirmSetPrice(props.animal.pda, {
-      animal_pda: props.animal.pda,
       txid: txid,
-      latestBlockhash: latestBlockhash
+      latestBlockhash: latestBlockhashForSend,
+      animal_pda: props.animal.pda
     });
 
     step.value = 'success';
@@ -89,9 +102,11 @@ const handleSetPrice = async () => {
   } catch (err) {
     console.error('Error setting price:', err);
     const apiError = err.response?.data?.message;
-    error.value = apiError
+    const finalError = apiError
       ? (Array.isArray(apiError) ? apiError.join(', ') : apiError)
       : (err.message || 'Failed to set price');
+    error.value = finalError; 
+    emit('error', finalError); 
     step.value = 'form';
   } finally {
     processing.value = false;
@@ -104,8 +119,7 @@ const handleSetPrice = async () => {
     <transition name="modal-fade">
       <div v-if="modelValue" @click="close"
         class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-        <div @click.stop
-          class="bg-white rounded-2xl shadow-2xl max-w-md w-full animate-scale-in">
+        <div @click.stop class="bg-white rounded-2xl shadow-2xl max-w-md w-full animate-scale-in">
 
           <div class="bg-gradient-to-r from-green-50 to-emerald-50 p-6 border-b border-green-200">
             <div class="flex justify-between items-center">
@@ -113,8 +127,7 @@ const handleSetPrice = async () => {
                 <DollarSign class="h-6 w-6 text-green-600" />
                 Set Animal Price
               </h2>
-              <button @click="close" class="text-gray-400 hover:text-gray-600 transition-colors"
-                :disabled="processing">
+              <button @click="close" class="text-gray-400 hover:text-gray-600 transition-colors" :disabled="processing">
                 <X class="h-6 w-6" />
               </button>
             </div>
@@ -133,17 +146,8 @@ const handleSetPrice = async () => {
               </label>
               <div class="relative">
                 <DollarSign class="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
-                <input
-                  v-model="price"
-                  id="price"
-                  type="number"
-                  step="0.001"
-                  min="0"
-                  required
-                  placeholder="0.00"
-                  class="input-field w-full pl-10"
-                  :disabled="processing"
-                />
+                <input v-model="price" id="price" type="number" step="0.001" min="0" required placeholder="0.00"
+                  class="input-field w-full pl-10" :disabled="processing" />
               </div>
               <p class="text-xs text-brand-text-light mt-1">
                 Enter the sale price in SOL. Set to 0 to remove from sale.
@@ -217,6 +221,7 @@ const handleSetPrice = async () => {
     opacity: 0;
     transform: scale(0.9);
   }
+
   to {
     opacity: 1;
     transform: scale(1);

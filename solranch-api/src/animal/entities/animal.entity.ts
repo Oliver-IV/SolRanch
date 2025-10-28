@@ -25,6 +25,10 @@ export class Animal {
     owner: User;
 
     @ManyToOne(() => Ranch)
+    @JoinColumn({ name: 'owner_ranch_pda', referencedColumnName: 'pda' })
+    ownerRanch: Ranch;
+
+    @ManyToOne(() => Ranch)
     @JoinColumn({ name: 'origin_ranch_pda', referencedColumnName: 'pda' })
     originRanch: Ranch;
 

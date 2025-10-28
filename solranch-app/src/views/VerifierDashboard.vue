@@ -6,6 +6,7 @@ import { Connection, Transaction, PublicKey } from '@solana/web3.js';
 import { Buffer } from 'buffer';
 import { useAuthStore } from '@/stores/auth';
 import { Loader2, Check, X, Inbox, User, Calendar, Hash, Trash2, Clock, AlertTriangle, RefreshCcw } from 'lucide-vue-next';
+import { RPC_URL } from '../utils/configs';
 
 const authStore = useAuthStore();
 
@@ -22,7 +23,6 @@ const showConfirmRejectModal = ref(false);
 
 // --- Wallet & Connection ---
 const { publicKey, signTransaction } = useWallet();
-const RPC_URL = 'http://127.0.0.1:8899';
 const connection = new Connection(RPC_URL, 'confirmed');
 
 // --- Utils ---

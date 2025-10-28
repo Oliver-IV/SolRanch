@@ -6,6 +6,7 @@ import RegisterRanchPage from '../views/RegisterRanchPage.vue'
 import api from '@/services/api';
 import MyRanchPage from '../views/MyRanchPage.vue'
 import VerifierDashboard from '../views/VerifierDashboard.vue'
+import AnimalDetailsPage from '../views/AnimalDetailsPage.vue'
 
 const requireAuth = async (to, from, next) => {
   const authStore = useAuthStore();
@@ -41,6 +42,12 @@ const router = createRouter({
       path: '/',
       name: 'home',
       component: HomePage
+    },
+    {
+      path: '/animal/:pda',
+      name: 'animal-details',
+      component: AnimalDetailsPage,
+      props: true
     },
     {
       path: '/admin',
@@ -101,6 +108,5 @@ const router = createRouter({
     },
   ]
 })
-
 
 export default router

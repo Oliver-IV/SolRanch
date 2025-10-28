@@ -5,6 +5,7 @@ import { Connection, VersionedTransaction, PublicKey } from '@solana/web3.js';
 import { Buffer } from 'buffer';
 import api from '@/services/api';
 import { X, UserCheck, Loader2, Check, AlertTriangle, User, ShieldOff } from 'lucide-vue-next';
+import { RPC_URL } from '../utils/configs';
 
 defineOptions({
   name: 'SetAllowedBuyerModal'
@@ -18,7 +19,6 @@ const emit = defineEmits(['close', 'success', 'error']);
 
 const { publicKey, signTransaction } = useWallet();
 
-const RPC_URL = 'http://127.0.0.1:8899';
 const connection = new Connection(RPC_URL, 'confirmed');
 
 const buyerPubkey = ref('');
@@ -60,7 +60,7 @@ const handleSetAllowedBuyer = async () => {
 
     step.value = 'building';
     const buildResponse = await api.animals.buildSetAllowedBuyerTx(props.animal.pda, {
-      buyer_pubkey: pubkeyToSend
+      allowedBuyerPubkey: pubkeyToSend
     });
 
     const txBase64 = buildResponse.data.transaction;
