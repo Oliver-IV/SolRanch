@@ -27,8 +27,8 @@ const error = ref(null);
 const step = ref('form');
 
 const isValid = computed(() => {
-  if (buyerPubkey.value.trim() === '') return true; 
-  
+  if (buyerPubkey.value.trim() === '') return true;
+
   try {
     new PublicKey(buyerPubkey.value.trim());
     return true;
@@ -54,9 +54,9 @@ const handleSetAllowedBuyer = async () => {
   error.value = null;
 
   try {
-    const pubkeyToSend = isUnset.value 
-        ? '11111111111111111111111111111111' // Usar la clave "SystemProgram" (solana::system_program::ID) como marcador para "unset"
-        : buyerPubkey.value.trim();
+    const pubkeyToSend = isUnset.value
+      ? '11111111111111111111111111111111' // Usar la clave "SystemProgram" (solana::system_program::ID) como marcador para "unset"
+      : buyerPubkey.value.trim();
 
     step.value = 'building';
     const buildResponse = await api.animals.buildSetAllowedBuyerTx(props.animal.pda, {
@@ -93,9 +93,9 @@ const handleSetAllowedBuyer = async () => {
 
     step.value = 'success';
     const successMsg = isUnset.value
-        ? 'Allowed buyer has been cleared. Sale is public.'
-        : `Allowed buyer set to ${pubkeyToSend.slice(0, 6)}...`;
-        
+      ? 'Allowed buyer has been cleared. Sale is public.'
+      : `Allowed buyer set to ${pubkeyToSend.slice(0, 6)}...`;
+
     emit('success', successMsg);
     setTimeout(close, 1500);
 
@@ -103,10 +103,10 @@ const handleSetAllowedBuyer = async () => {
     console.error('Error setting allowed buyer:', err);
     const apiError = err.response?.data?.message;
     const finalError = apiError
-        ? (Array.isArray(apiError) ? apiError.join(', ') : apiError)
-        : (err.message || 'Failed to set allowed buyer');
-    
-    emit('error', finalError); 
+      ? (Array.isArray(apiError) ? apiError.join(', ') : apiError)
+      : (err.message || 'Failed to set allowed buyer');
+
+    emit('error', finalError);
     step.value = 'form';
   } finally {
     processing.value = false;
@@ -119,8 +119,7 @@ const handleSetAllowedBuyer = async () => {
     <transition name="modal-fade">
       <div v-if="animal" @click="close"
         class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-        <div @click.stop
-          class="bg-white rounded-2xl shadow-2xl max-w-md w-full animate-scale-in">
+        <div @click.stop class="bg-white rounded-2xl shadow-2xl max-w-md w-full animate-scale-in">
 
           <div class="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 border-b border-blue-200">
             <div class="flex justify-between items-center">
@@ -128,8 +127,7 @@ const handleSetAllowedBuyer = async () => {
                 <UserCheck class="h-6 w-6 text-blue-600" />
                 Set Allowed Buyer
               </h2>
-              <button @click="close" class="text-gray-400 hover:text-gray-600 transition-colors"
-                :disabled="processing">
+              <button @click="close" class="text-gray-400 hover:text-gray-600 transition-colors" :disabled="processing">
                 <X class="h-6 w-6" />
               </button>
             </div>
@@ -147,17 +145,9 @@ const handleSetAllowedBuyer = async () => {
                 Allowed Buyer Public Key
               </label>
               <div class="relative">
-                <User class="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
-                <input
-                  v-model="buyerPubkey"
-                  id="buyerPubkey"
-                  type="text"
-                  required
-                  placeholder="Leave empty for public sale"
-                  class="input-field w-full pl-10"
-                  :class="{'border-red-500': buyerPubkey.length > 0 && !isValid}"
-                  :disabled="processing"
-                />
+                <input v-model="buyerPubkey" id="buyerPubkey" type="text" required
+                  placeholder="Leave empty for public sale" class="input-field w-full pl-10"
+                  :class="{ 'border-red-500': buyerPubkey.length > 0 && !isValid }" :disabled="processing" />
               </div>
               <p v-if="!isValid && buyerPubkey.length > 0" class="text-xs text-red-500 mt-1">
                 Invalid Solana Public Key format.
@@ -166,11 +156,13 @@ const handleSetAllowedBuyer = async () => {
                 Enter the Solana address of the only account allowed to buy this animal.
               </p>
             </div>
-            
-            <div v-if="animal.allowed_buyer_pubkey && animal.allowed_buyer_pubkey !== '11111111111111111111111111111111'" class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm flex items-center gap-2">
-                <ShieldOff class="h-4 w-4 text-blue-700 flex-shrink-0" />
-                <span class="text-blue-700 font-medium">Currently Restricted to:</span>
-                <span class="font-mono text-xs truncate">{{ animal.allowed_buyer_pubkey }}</span>
+
+            <div
+              v-if="animal.allowed_buyer_pubkey && animal.allowed_buyer_pubkey !== '11111111111111111111111111111111'"
+              class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm flex items-center gap-2">
+              <ShieldOff class="h-4 w-4 text-blue-700 flex-shrink-0" />
+              <span class="text-blue-700 font-medium">Currently Restricted to:</span>
+              <span class="font-mono text-xs truncate">{{ animal.allowed_buyer_pubkey }}</span>
             </div>
 
             <div v-if="error"
@@ -240,6 +232,7 @@ const handleSetAllowedBuyer = async () => {
     opacity: 0;
     transform: scale(0.9);
   }
+
   to {
     opacity: 1;
     transform: scale(1);
