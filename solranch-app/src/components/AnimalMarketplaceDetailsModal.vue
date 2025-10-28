@@ -308,7 +308,7 @@ onMounted(() => {
                                       <CheckCircle class="detail-icon text-green-600"/>
                                       <span class="detail-label-text">Public Sale</span>
                                  </div>
-                                  <p class="text-xs text-gray-600 mt-1">This animal can be purchased by any connected wallet.</p>
+                                  <p class="text-xs text-gray-600 mt-1">This animal can be purchased by an authorized connected wallet.</p>
                                    <div v-if="!isOwner && publicKey" class="auth-message bg-green-50 text-green-700 border-green-200 mt-2">
                                         <CheckCircle class="h-4 w-4" /> You can purchase this animal.
                                     </div>
